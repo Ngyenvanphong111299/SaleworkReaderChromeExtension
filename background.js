@@ -28,7 +28,10 @@ function logToPopup(message, type = 'info') {
 
 // ============ HELPER FUNCTIONS ============
 function getPhoneFromOrder(order) {
-  return order.phoneNumber || order.phone || order.phone_number || null;
+  // Check all possible field names (API returns PascalCase)
+  // Trim to remove leading/trailing whitespace
+  const phone = order.phoneNumber || order.PhoneNumber || order.phone || order.phone_number || null;
+  return phone ? phone.trim() : null;
 }
 
 console.log('>>> [STATE] isProcessing:', isProcessing);
@@ -36,87 +39,126 @@ console.log('>>> [STATE] currentPhoneNumber:', currentPhoneNumber);
 
 // ============ API FUNCTIONS ============
 
-async function fetchOneOrder(limit = 1) {
+async function fetchOneOrder(maxRetries = 50) {
   console.log('');
   console.log('==============================================================');
   console.log('  [API] LAY 1 DON DE XU LY                           ');
   console.log('==============================================================');
 
-  try {
-    const url = API_BASE + '/salework/erp/orders/uncrawled?limit=' + limit;
-    console.log('>>> [API] URL:', url);
+  let retries = 0;
 
-    const response = await fetch(url);
-    console.log('>>> [API] Response status:', response.status);
+  while (retries < maxRetries) {
+    try {
+      const url = API_BASE + '/salework/erp/orders/uncrawled?limit=1';
+      console.log('>>> [API] URL:', url);
 
-    if (!response.ok) {
-      throw new Error('API error: ' + response.status);
-    }
+      const response = await fetch(url);
+      console.log('>>> [API] Response status:', response.status);
 
-    const data = await response.json();
-    const orders = Array.isArray(data) ? data : (data.value || []);
+      if (!response.ok) {
+        throw new Error('API error: ' + response.status);
+      }
 
-    if (orders.length === 0) {
-      logToPopup('Khong con don nao!', 'warn');
+      const data = await response.json();
+      const orders = Array.isArray(data) ? data : (data.value || []);
+
+      console.log('>>> [API] Orders count:', orders.length);
+
+      if (orders.length === 0) {
+        logToPopup('Khong con don nao!', 'warn');
+        return null;
+      }
+
+      const order = orders[0];
+      const phoneNumber = getPhoneFromOrder(order);
+
+      console.log('>>> [API] PhoneNumber:', phoneNumber, '| Order:', JSON.stringify(order).substring(0, 200));
+
+      // Kiểm tra phoneNumber hợp lệ
+      if (!phoneNumber || phoneNumber.length === 0) {
+        retries++;
+        logToPopup('Don ' + retries + ' - SDT rong (bo qua)...', 'warn');
+
+        // Đánh dấu đã crawl để skip đơn không có SDT
+        const skipOrderId = order.id || order.Id;
+        if (skipOrderId) {
+          await markOrderAsCrawled(skipOrderId, 0);
+        }
+        console.log('>>> [API] Skip don rong, tiep tuc lay don khac...');
+        continue;
+      }
+
+      // Tìm thấy đơn có SDT hợp lệ
+      logToPopup('Don tiep theo - SDT: ' + phoneNumber, 'info');
+      return { order, phoneNumber };
+
+    } catch (e) {
+      console.log('>>> [API] Loi:', e.message);
+      logToPopup('Loi API: ' + e.message, 'error');
       return null;
     }
-
-    const order = orders[0];
-    const phoneNumber = getPhoneFromOrder(order);
-
-    logToPopup('Don tiep theo - SDT: ' + (phoneNumber || 'khong co'), 'info');
-
-    return { order, phoneNumber };
-
-  } catch (e) {
-    console.log('>>> [API] Loi:', e.message);
-    logToPopup('Loi API: ' + e.message, 'error');
-    return null;
   }
+
+  logToPopup('Khong tim thay don nao voi SDT!', 'error');
+  return null;
 }
 
 async function saveMessages(phoneNumber, messages) {
   console.log('>>> [API] Luu tin nhan cho SDT:', phoneNumber);
+  console.log('>>> [API] So tin nhan:', messages?.length || 0);
+
+  // Debug: Log first message to see structure
+  if (messages && messages.length > 0) {
+    console.log('>>> [API] First message sample:', JSON.stringify(messages[0]).substring(0, 200));
+  }
 
   try {
+    const requestBody = { phoneNumber: phoneNumber, messages: messages };
+    console.log('>>> [API] Request body:', JSON.stringify(requestBody).substring(0, 500));
+
     const response = await fetch(API_BASE + '/salework/messages', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ phoneNumber: phoneNumber, messages: messages })
+      body: JSON.stringify(requestBody)
     });
 
+    console.log('>>> [API] Response status:', response.status);
+
     if (!response.ok) {
-      throw new Error('API error: ' + response.status);
+      const errorText = await response.text();
+      console.log('>>> [API] Error response:', errorText);
+      throw new Error('API error: ' + response.status + ' - ' + errorText);
     }
 
     const result = await response.json();
     logToPopup('Da luu ' + messages.length + ' tin nhan', 'info');
     return true;
   } catch (e) {
+    console.log('>>> [API] Exception:', e.message);
     logToPopup('Loi luu: ' + e.message, 'error');
     return false;
   }
 }
 
 // Danh dau don da crawl (ke ca khi 0 tin nhan)
-async function markOrderAsCrawled(phoneNumber, messageCount) {
-  console.log('>>> [API] Danh dau da crawl cho SDT:', phoneNumber);
+async function markOrderAsCrawled(orderId, messageCount) {
+  console.log('>>> [API] Danh dau da crawl cho orderId:', orderId);
 
   try {
     const response = await fetch(API_BASE + '/salework/orders/crawled', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ phoneNumber: phoneNumber, messageCount: messageCount })
+      body: JSON.stringify({ orderId: orderId, messageCount: messageCount })
     });
 
     if (!response.ok) {
       throw new Error('API error: ' + response.status);
     }
 
-    logToPopup('Da danh dau crawl (0 tin nhan)', 'info');
+    console.log('>>> [API] Da danh dau crawl thanh cong');
     return true;
   } catch (e) {
-    logToPopup('Loi danh dau: ' + e.message, 'error');
+    console.log('>>> [API] Loi danh dau:', e.message);
     return false;
   }
 }
@@ -269,52 +311,68 @@ async function startCrawl() {
   }
 
   isProcessing = true;
-  logToPopup('Dang lay don tu API...', 'info');
+  let totalCrawled = 0;
+  let keepRunning = true;
 
-  // Lay 1 don tu API
-  const result = await fetchOneOrder(1);
+  // Vòng lặp crawl nhiều đơn
+  while (keepRunning && isProcessing) {
+    logToPopup('=== Lay don tiep theo... ===', 'info');
 
-  if (!result || !result.phoneNumber) {
-    logToPopup('Khong con don nao de xu ly!', 'warn');
-    isProcessing = false;
-    return { success: true, count: 0, message: 'Khong con don' };
-  }
+    // Lay 1 don tu API
+    const result = await fetchOneOrder();
 
-  const { order, phoneNumber } = result;
-  currentPhoneNumber = phoneNumber;
+    if (!result || !result.phoneNumber) {
+      logToPopup('Khong con don nao de xu ly!', 'warn');
+      break;
+    }
 
-  // Gui cap nhat trang thai
-  chrome.runtime.sendMessage({
-    type: 'STATUS_UPDATE',
-    status: 'processing',
-    current: 1,
-    total: 1,
-    phone: phoneNumber
-  });
+    const { order, phoneNumber } = result;
+    currentPhoneNumber = phoneNumber;
+    totalCrawled++;
 
-  // Xu ly sdt
-  logToPopup('Xu ly SDT: ' + phoneNumber, 'info');
+    // Gui cap nhat trang thai
+    chrome.runtime.sendMessage({
+      type: 'STATUS_UPDATE',
+      status: 'processing',
+      current: totalCrawled,
+      total: totalCrawled,
+      phone: phoneNumber
+    });
 
-  const messages = await processPhone(phoneNumber);
+    // Xu ly sdt
+    logToPopup('Xu ly SDT: ' + phoneNumber + ' (don ' + totalCrawled + ')', 'info');
 
-  if (messages && messages.length > 0) {
-    await saveMessages(phoneNumber, messages);
-  } else {
-    logToPopup('Khong co tin nhan de luu', 'warn');
+    const messages = await processPhone(phoneNumber);
 
-    // Van goi API danh dau da crawl (vi du lieu trang web co the thay doi)
-    await markOrderAsCrawled(phoneNumber, 0);
+    // Luôn đánh dấu đã crawl sau khi xử lý
+    const orderId = order.id || order.Id;
+    await markOrderAsCrawled(orderId, messages?.length || 0);
+
+    if (messages && messages.length > 0) {
+      const saved = await saveMessages(phoneNumber, messages);
+      if (saved) {
+        logToPopup('Da luu ' + messages.length + ' tin nhan', 'success');
+      }
+    } else {
+      logToPopup('Khong co tin nhan de luu', 'warn');
+    }
+
+    // Đợi một chút trước khi tiếp tục đơn tiếp theo
+    logToPopup('Doi 2s roi tiep tuc...', 'info');
+    await new Promise(r => setTimeout(r, 2000));
+
+    currentPhoneNumber = null;
   }
 
   isProcessing = false;
-  currentPhoneNumber = null;
 
   // Gui trang thai hoan thanh
   chrome.runtime.sendMessage({ type: 'STATUS_UPDATE', status: 'done' });
 
-  logToPopup('=== HOAN THANH 1 SDT ===', 'success');
+  logToPopup('=== HOAN THANH TAT CA ===', 'success');
+  logToPopup('Tong so don da crawl: ' + totalCrawled, 'success');
 
-  return { success: true, count: 1 };
+  return { success: true, count: totalCrawled };
 }
 
 console.log('');

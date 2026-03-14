@@ -137,6 +137,79 @@ function findAndClickSearchButton() {
   return false;
 }
 
+// Tìm tất cả conversations cho một số điện thoại
+function findAllConversations() {
+  console.log('');
+  console.log('>>> [FIND_ALL_CONV] Tìm tất cả conversations...');
+
+  // Các selector để tìm danh sách conversation
+  const listSelectors = [
+    '.z2-conversation-list',
+    '.z2-conver-list-container .z2-conversation-list',
+    '[class*="conversation-list"]',
+    '.z2-conver-list-container',
+    '#conversation-page-v2 > div.z2-conver-list-container',
+    '[class*="search-result"]'
+  ];
+
+  let convList = null;
+  for (const selector of listSelectors) {
+    convList = document.querySelector(selector);
+    if (convList) {
+      console.log('>>> [FIND_ALL_CONV] ✓ Tìm thấy container với selector:', selector);
+      break;
+    }
+  }
+
+  // Debug: Try to find any element containing "conversation"
+  if (!convList) {
+    console.log('>>> [FIND_ALL_CONV] Debug: Tìm elements có "conversation"...');
+    const convElements = document.querySelectorAll('[class*="conversation"]');
+    console.log('>>> [FIND_ALL_CONV] Tìm thấy ' + convElements.length + ' elements có "conversation"');
+    for (let i = 0; i < Math.min(5, convElements.length); i++) {
+      console.log('>>> [FIND_ALL_CONV]   - ' + convElements[i].className);
+    }
+  }
+
+  if (!convList) {
+    console.log('>>> [FIND_ALL_CONV] ✗ Không tìm thấy danh sách conversation');
+    return [];
+  }
+
+  // Tìm tất cả conversation items
+  const itemSelectors = [
+    '.z2-conversation-item',
+    '[class*="conversation-item"]',
+    '.z2-conver-list-container > div > div',
+    '.z2-conversation-list > div',
+    '[class*="conversation"]'
+  ];
+
+  let allConvs = [];
+  for (const selector of itemSelectors) {
+    allConvs = convList.querySelectorAll(selector);
+    if (allConvs.length > 0) {
+      console.log('>>> [FIND_ALL_CONV] ✓ Tìm thấy ' + allConvs.length + ' conversations với selector:', selector);
+      break;
+    }
+  }
+
+  if (allConvs.length === 0) {
+    // Fallback: Get all direct children
+    console.log('>>> [FIND_ALL_CONV] Thử lấy tất cả direct children...');
+    allConvs = convList.children;
+    console.log('>>> [FIND_ALL_CONV] Tìm thấy ' + allConvs.length + ' children');
+  }
+
+  if (allConvs.length === 0) {
+    console.log('>>> [FIND_ALL_CONV] ✗ Không tìm thấy conversation items');
+    return [];
+  }
+
+  console.log('>>> [FIND_ALL_CONV] Tổng cộng ' + allConvs.length + ' conversations');
+  return Array.from(allConvs);
+}
+
 // Tìm conversation trong danh sách
 function findConversation() {
   console.log('');
@@ -185,29 +258,94 @@ function findConversation() {
   return null;
 }
 
-// Scroll để load tin nhắn cũ
-async function scrollUpToLoadMessages(times) {
+// Scroll để load tin nhắn cũ - không giới hạn, scroll đến khi không còn tin nhắn mới
+async function scrollUpToLoadMessages() {
   console.log('');
-  console.log('>>> [SCROLL] Bắt đầu scroll để load tin nhắn cũ');
-  console.log('>>> [SCROLL] Số lần scroll:', times);
+  console.log('>>> [SCROLL] Bắt đầu scroll để load toàn bộ tin nhắn');
+  console.log('>>> [SCROLL] Mục tiêu: Trích xuất toàn bộ tin nhắn');
 
-  for (let i = 0; i < times; i++) {
-    console.log('>>> [SCROLL] Scroll lần ' + (i + 1) + '/' + times);
+  // Tìm container scroll
+  const scrollContainer = document.querySelector("#conversation-page-v2 > div.d-flex.flex-grow-1 > div.d-flex.flex-grow-1.flex-column.justify-content-between.border-right > div.z2-conversation-body.scrollbar.pt-5");
 
-    // Scroll lên đầu
-    window.scrollTo(0, 0);
-    console.log('>>> [SCROLL] Đã scroll lên đỉnh');
-
-    // Đợi load
-    await new Promise(r => setTimeout(r, 1000));
-    console.log('>>> [SCROLL] Đợi xong 1s');
-
-    // Kiểm tra xem có tin nhắn mới không
-    const msgContainers = document.querySelectorAll('.z2-message-container');
-    console.log('>>> [SCROLL] Số message containers hiện tại:', msgContainers.length);
+  // Fallback nếu không tìm thấy
+  let fallbackContainer = null;
+  if (!scrollContainer) {
+    console.log('>>> [SCROLL] Container chính không tìm thấy, thử fallback...');
+    fallbackContainer = document.querySelector('.z2-conversation-body');
+    if (fallbackContainer) {
+      console.log('>>> [SCROLL] Fallback container tìm thấy!');
+    }
   }
 
-  console.log('>>> [SCROLL] ✓ HOÀN THÀNH scroll ' + times + ' lần');
+  console.log('>>> [SCROLL] Container:', scrollContainer || fallbackContainer ? 'Tìm thấy!' : 'KHÔNG tìm thấy');
+
+  let lastCount = 0;
+  let noChangeCount = 0;
+  const maxNoChange = 5; // Dừng sau 5 lần không có tin nhắn mới
+  let i = 0;
+
+  while (true) {
+    i++;
+    const currentContainer = scrollContainer || fallbackContainer;
+
+    if (!currentContainer) {
+      console.log('>>> [SCROLL] ✗ Không tìm thấy container, dừng lại');
+      break;
+    }
+
+    // Lấy số tin nhắn trước khi scroll
+    let beforeContainers = document.querySelectorAll('.z2-message-container');
+    if (beforeContainers.length === 0) {
+      beforeContainers = document.querySelectorAll('[class*="message-container"]');
+    }
+    if (beforeContainers.length === 0) {
+      beforeContainers = document.querySelectorAll('div[class*="z2-message"]');
+    }
+    const countBefore = beforeContainers.length;
+
+    console.log('>>> [SCROLL] Lần ' + i + ' - Trước scroll: ' + countBefore + ' tin nhắn');
+
+    // Scroll lên đầu
+    currentContainer.scrollTop = -99999;
+
+    // Đợi load tin nhắn mới
+    await new Promise(r => setTimeout(r, 4000));
+
+    // Lấy số tin nhắn sau khi scroll
+    let afterContainers = document.querySelectorAll('.z2-message-container');
+    if (afterContainers.length === 0) {
+      afterContainers = document.querySelectorAll('[class*="message-container"]');
+    }
+    if (afterContainers.length === 0) {
+      afterContainers = document.querySelectorAll('div[class*="z2-message"]');
+    }
+    const countAfter = afterContainers.length;
+
+    console.log('>>> [SCROLL] Lần ' + i + ' - Sau scroll: ' + countAfter + ' tin nhắn (+' + (countAfter - countBefore) + ')');
+
+    // Kiểm tra nếu không có tin nhắn mới
+    if (countAfter === countBefore) {
+      noChangeCount++;
+      console.log('>>> [SCROLL] Không có tin nhắn mới (lần ' + noChangeCount + '/' + maxNoChange + ')');
+
+      if (noChangeCount >= maxNoChange) {
+        console.log('>>> [SCROLL] ✓ Đã đến đầu cuộc trò chuyện, dừng scroll');
+        break;
+      }
+    } else {
+      noChangeCount = 0;
+    }
+
+    lastCount = countAfter;
+
+    // Giới hạn an toàn - không scroll quá 100 lần
+    if (i >= 100) {
+      console.log('>>> [SCROLL] ⚠ Đạt giới hạn tối đa 100 lần scroll');
+      break;
+    }
+  }
+
+  console.log('>>> [SCROLL] ✓ HOÀN THÀNH - Tổng cộng ' + i + ' lần scroll, ' + lastCount + ' tin nhắn');
 }
 
 // Trích xuất tin nhắn từ conversation
@@ -218,21 +356,19 @@ function extractMessages() {
   console.log('========================================');
 
   const messages = [];
-  const allContainers = document.querySelectorAll('.z2-message-container');
 
-  console.log('>>> [EXTRACT] Tìm thấy ' + allContainers.length + ' message containers');
+  // Tìm tất cả message containers - selector chính xác từ HTML
+  let allContainers = document.querySelectorAll('.z2-message-container');
+  console.log('>>> [EXTRACT] Tìm thấy ' + allContainers.length + ' z2-message-container');
+
+  // Debug - kiểm tra conversation body
+  const conversationBody = document.querySelector('.z2-conversation-body');
+  console.log('>>> [EXTRACT] Conversation body:', conversationBody ? 'Tìm thấy' : 'KHÔNG');
 
   if (allContainers.length === 0) {
     console.log('>>> [EXTRACT] ✗ KHÔNG CÓ tin nhắn nào!');
-
-    // Debug: Thử tìm các element khác
-    console.log('>>> [EXTRACT] Debug: Tìm các element khác...');
-    const allDivs = document.querySelectorAll('div');
-    console.log('>>> [EXTRACT] Tổng số divs:', allDivs.length);
-
-    // Tìm các element có chứa tin nhắn
-    const msgDivs = document.querySelectorAll('div[class*="message"]');
-    console.log('>>> [EXTRACT] Elements có "message" trong class:', msgDivs.length);
+  } else {
+    console.log('>>> [EXTRACT] Bắt đầu duyệt qua ' + allContainers.length + ' containers...');
   }
 
   allContainers.forEach((container, index) => {
@@ -259,13 +395,15 @@ function extractMessages() {
       const msgType = isRight ? 'sent' : 'received';
       console.log('>>> [EXTRACT] #' + index + ': Loại = ' + msgType);
 
-      // Lấy thời gian
+      // Lấy thời gian - cập nhật selector
       let time = '';
-      const timeEl = container.querySelector('.z2-message-item-right-footer .el-tooltip') ||
-                     container.querySelector('.z2-message-item-left-footer .el-tooltip');
-      if (timeEl) {
-        time = timeEl.textContent.trim();
-        console.log('>>> [EXTRACT] #' + index + ': Thời gian = ' + time);
+      const footerEl = container.querySelector('.z2-message-item-right-footer') || container.querySelector('.z2-message-item-left-footer');
+      if (footerEl) {
+        const timeEl = footerEl.querySelector('.el-tooltip');
+        if (timeEl) {
+          time = timeEl.textContent.trim();
+          console.log('>>> [EXTRACT] #' + index + ': Thời gian = ' + time);
+        }
       }
 
       const msgId = container.id || 'msg_' + index;
@@ -280,21 +418,72 @@ function extractMessages() {
         console.log('>>> [EXTRACT] #' + index + ': Reply từ ' + (quotedSender || 'unknown') + ': ' + quotedContent?.substring(0, 30));
       }
 
-      // Lấy nội dung text
+      // Lấy nội dung text - cập nhật selector để khớp với HTML thực tế
       let content = '';
-      const textEl = container.querySelector('.z2-message-item-content-text') ||
-                     container.querySelector('[class*="message-content"]');
+
+      // Thử nhiều selector khác nhau - ưu tiên selector cụ thể hơn
+      let textEl = container.querySelector('.z2-message-item-right-content span[id="regexText"]');
+      if (!textEl) {
+        textEl = container.querySelector('.z2-message-item-left-content span[id="regexText"]');
+      }
+      if (!textEl) {
+        textEl = container.querySelector('.z2-message-item-right .mb-0.text-normal span');
+      }
+      if (!textEl) {
+        textEl = container.querySelector('.z2-message-item-left .mb-0.text-normal span');
+      }
+      if (!textEl) {
+        // Fallback: tìm span đầu tiên có nội dung trong message content
+        const contentDiv = container.querySelector('.z2-message-item-right-content, .z2-message-item-left-content');
+        if (contentDiv) {
+          const spans = contentDiv.querySelectorAll('span');
+          for (const span of spans) {
+            const text = span.textContent?.trim();
+            // Lọc các text không phải là action buttons
+            if (text && text.length > 0 && !text.includes('Trả lời') && !text.includes('Chuyển tiếp') &&
+                !text.includes('Ghim') && !text.includes('Copy') && !text.includes('Xoá') &&
+                !text.includes('Lưu ảnh') && !text.includes('Chọn nhiều') && !text.includes('Thu hồi')) {
+              textEl = span;
+              break;
+            }
+          }
+        }
+      }
+
       if (textEl) {
         content = textEl.textContent.trim();
         console.log('>>> [EXTRACT] #' + index + ': Nội dung = ' + (content?.substring(0, 50) || '(trống)'));
+      } else {
+        console.log('>>> [EXTRACT] #' + index + ': KHÔNG tìm thấy text');
       }
 
-      // Lấy hình ảnh
-      const imageEl = container.querySelector('img[class*="message-image"]');
-      const imageUrl = imageEl?.src;
-      if (imageEl) {
-        console.log('>>> [EXTRACT] #' + index + ': Có HÌNH ẢNH');
-        if (!content) content = '[Image]';
+      // Lấy hình ảnh - cập nhật selector
+      let imageUrl = '';
+      const photoContainer = container.querySelector('.photo-container');
+      if (photoContainer) {
+        const imageEl = photoContainer.querySelector('img.el-image__preview');
+        if (imageEl) {
+          imageUrl = imageEl.src || imageEl.getAttribute('src');
+          console.log('>>> [EXTRACT] #' + index + ': Có HÌNH ẢNH: ' + imageUrl?.substring(0, 50));
+        }
+      }
+
+      // Fallback: tìm bất kỳ image nào
+      if (!imageUrl) {
+        const allImages = container.querySelectorAll('img');
+        for (const img of allImages) {
+          const src = img.src || img.getAttribute('src');
+          if (src && !src.includes('emoji') && !src.includes('icon') && !src.includes('three_dots')) {
+            imageUrl = src;
+            console.log('>>> [EXTRACT] #' + index + ': Có HÌNH ẢNH (fallback): ' + imageUrl?.substring(0, 50));
+            break;
+          }
+        }
+      }
+
+      // Nếu có image nhưng không có content, đánh dấu là image
+      if (imageUrl && !content) {
+        content = '[Image]';
       }
 
       if (content || imageUrl) {
@@ -391,77 +580,101 @@ function fillAndSearchAndClick(phoneNumber) {
     // Bước 3: Đợi kết quả search và click conversation
     console.log('');
     console.log('>>> ═══════════════════════════════════');
-    console.log('>>> BƯỚC 3: ĐỢI KẾT QUẢ SEARCH (4s)');
+    console.log('>>> BƯỚC 3: ĐỢI KẾT QUẢ SEARCH (6s)');
     console.log('>>> ═══════════════════════════════════');
     console.log('>>> [RETRY] Đợi load kết quả search...');
 
-    setTimeout(() => {
-      console.log('>>> [RETRY] Đợi xong, tìm conversation...');
+    setTimeout(async () => {
+      console.log('>>> [RETRY] Đợi xong, tìm all conversations...');
 
-      // Kiểm tra xem có kết quả search không
-      const searchResults = document.querySelectorAll('[class*="result"], [class*="conversation"]');
-      console.log('>>> [RETRY] Số elements liên quan đến conversation:', searchResults.length);
+      // Debug: Log HTML structure
+      console.log('>>> [RETRY] Debug: Body innerHTML length:', document.body.innerHTML.length);
 
-      const conv = findConversation();
+      // Tìm tất cả conversations
+      const allConvs = findAllConversations();
 
-      if (conv) {
+      console.log('>>> [RETRY] Tìm thấy conversations:', allConvs.length);
+
+      if (allConvs.length === 0) {
+        console.log('>>> [RETRY] Không tìm thấy conversation nào');
+        retrySearch();
+        return;
+      }
+
+      console.log('');
+      console.log('>>> ═══════════════════════════════════');
+      console.log('>>> TÌM THẤY ' + allConvs.length + ' CONVERSATIONS');
+      console.log('>>> ═══════════════════════════════════');
+
+      // Crawl từng conversation và gửi về backend ngay sau mỗi conversation
+      let totalMessages = 0;
+      let conversationIndex = 0;
+
+      for (const conv of allConvs) {
         console.log('');
-        console.log('>>> ═══════════════════════════════════');
-        console.log('>>> BƯỚC 4: CLICK VÀO CONVERSATION');
-        console.log('>>> ═══════════════════════════════════');
+        console.log('╔══════════════════════════════════════╗');
+        console.log('║  CONVERSATION ' + (conversationIndex + 1) + '/' + allConvs.length + '                    ║');
+        console.log('╚══════════════════════════════════════╝');
 
+        // Click vào conversation
+        console.log('>>> [CONV ' + (conversationIndex + 1) + '] Click vào conversation...');
         conv.click();
-        console.log('>>> [RETRY] ✓ Đã click vào conversation!');
 
-        // Bước 5: Đợi load tin nhắn
-        console.log('');
-        console.log('>>> ═══════════════════════════════════');
-        console.log('>>> BƯỚC 5: ĐỢI LOAD TIN NHẮN (4s)');
-        console.log('>>> ═══════════════════════════════════');
+        // Đợi load tin nhắn
+        await new Promise(r => setTimeout(r, 3000));
 
-        setTimeout(() => {
-          // Bước 6: Scroll để load tin nhắn cũ
-          console.log('');
-          console.log('>>> ═══════════════════════════════════');
-          console.log('>>> BƯỚC 6: SCROLL ĐỂ LOAD TIN NHẮN CŨ');
-          console.log('>>> ═══════════════════════════════════');
+        // Scroll để load tin nhắn cũ
+        console.log('>>> [CONV ' + (conversationIndex + 1) + '] Scroll để load tin nhắn cũ...');
+        await scrollUpToLoadMessages();
 
-          scrollUpToLoadMessages(5).then(() => {
-            // Bước 7: Trích xuất tin nhắn
-            console.log('');
-            console.log('>>> ═══════════════════════════════════');
-            console.log('>>> BƯỚC 7: TRÍCH XUẤT TIN NHẮN');
-            console.log('>>> ═══════════════════════════════════');
+        // Trích xuất tin nhắn
+        console.log('>>> [CONV ' + (conversationIndex + 1) + '] Trích xuất tin nhắn...');
+        const messages = extractMessages();
 
-            const messages = extractMessages();
-            window.__extractedMessages = messages;
-            window.__extractedPhone = phoneNumber;
+        // Thêm staffName để phân biệt conversation
+        const staffNameEl = conv.querySelector('[class*="name"], [class*="staff"]');
+        const staffName = staffNameEl?.textContent?.trim() || 'Conversation ' + (conversationIndex + 1);
 
-            console.log('');
-            console.log('╔══════════════════════════════════════╗');
-            console.log('║  GỬI TIN NHẮN VỀ BACKGROUND          ║');
-            console.log('║  Số điện thoại: ' + phoneNumber + '              ║');
-            console.log('║  Số tin nhắn: ' + messages.length + '                    ║');
-            console.log('╚══════════════════════════════════════╝');
-            console.log('');
+        const messagesWithStaff = messages.map(msg => ({
+          ...msg,
+          staffName: staffName
+        }));
 
+        console.log('>>> [CONV ' + (conversationIndex + 1) + '] Trích xuất được ' + messages.length + ' tin nhắn');
+
+        // Gửi tin nhắn về backend NGAY SAU KHI CRAWL XONG CONVERSATION NÀY
+        if (messagesWithStaff.length > 0) {
+          console.log('>>> [CONV ' + (conversationIndex + 1) + '] Gửi tin nhắn về backend...');
+
+          // Sử dụng promise để đợi gửi xong
+          await new Promise((resolve) => {
             chrome.runtime.sendMessage({
               type: 'MESSAGES_EXTRACTED',
               phoneNumber: phoneNumber,
-              messages: messages
+              messages: messagesWithStaff
             }, (response) => {
-              console.log('>>> [RETRY] ✓ Đã gửi tin nhắn về background');
-              console.log('>>> [RETRY] Response:', response);
+              console.log('>>> [CONV ' + (conversationIndex + 1) + '] ✓ Đã gửi tin nhắn về backend');
+              resolve(response);
             });
           });
-        }, 4000);
-      } else {
-        console.log('');
-        console.log('>>> [RETRY] ✗ Không tìm thấy conversation!');
-        console.log('>>> [RETRY] Thử lại...');
-        retrySearch();
+        }
+
+        totalMessages += messages.length;
+        conversationIndex++;
+
+        // Đợi một chút trước khi chuyển sang conversation tiếp theo
+        if (conversationIndex < allConvs.length) {
+          await new Promise(r => setTimeout(r, 1000));
+        }
       }
-    }, 4000);
+
+      window.__extractedPhone = phoneNumber;
+      console.log('');
+      console.log('╔══════════════════════════════════════╗');
+      console.log('║  HOÀN THÀNH CRAWL ' + allConvs.length + ' CONVERSATIONS     ║');
+      console.log('║  Tổng tin nhắn: ' + totalMessages + '                    ║');
+      console.log('╚══════════════════════════════════════╝');
+    }, 6000);
   }
 
   retrySearch();
@@ -493,7 +706,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'EXTRACT_MESSAGES') {
     console.log('>>> Yêu cầu: Trích xuất tin nhắn');
     setTimeout(() => {
-      scrollUpToLoadMessages(3).then(() => {
+      scrollUpToLoadMessages().then(() => {
         const messages = extractMessages();
         window.__extractedMessages = messages;
         sendResponse({ success: true, messages: messages });
