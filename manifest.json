@@ -1,0 +1,28 @@
+{
+  "manifest_version": 3,
+  "name": "Salework Crawler",
+  "version": "2.0",
+  "description": "Tự động tìm kiếm và trích xuất tin nhắn từ Salework",
+  "permissions": [
+    "activeTab",
+    "storage",
+    "tabs",
+    "scripting",
+    "alarms",
+    "sidePanel"
+  ],
+  "host_permissions": [
+    "*://*.salework.net/*",
+    "http://localhost:5153/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "Salework Crawler"
+  },
+  "side_panel": {
+    "default_path": "popup.html"
+  }
+}
