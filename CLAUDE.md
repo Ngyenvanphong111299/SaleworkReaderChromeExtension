@@ -13,8 +13,16 @@ Chrome Extension (Manifest V3) để tự động tìm kiếm và trích xuất 
 ## Architecture
 
 - **manifest.json** - Cấu hình extension (permissions, host permissions, side panel)
-- **background.js** - Service worker xử lý logic crawl, gọi API, quản lý queue
-- **content.js** - Script injected vào trang Salework để thao tác DOM (fill phone, extract messages)
+- **js/01-config.js** - Step 01: Hằng số (API_BASE, TIMING)
+- **js/02-utils.js** - Step 02: Tiện ích (logToPopup, getPhoneFromOrder)
+- **js/03-api.js** - Step 03: Gọi API (fetch orders, save messages, mark crawled)
+- **js/04-crawl.js** - Step 04: Logic crawl (processPhone, startCrawl)
+- **js/05-background.js** - Step 05: Entry point, message handling
+- **content/01-search.js** - Step 01: Tìm ô search, nút search
+- **content/02-conversation.js** - Step 02: Tìm và click vào conversation
+- **content/03-scroll.js** - Step 03: Scroll load tin nhắn cũ
+- **content/04-extract.js** - Step 04: Trích xuất tin nhắn từ DOM
+- **content/05-main.js** - Step 05: Luồng chính fillAndSearchAndClick, message listener
 - **popup.js/popup.html** - Side panel UI để nhập số điện thoại và hiển thị tin nhắn
 
 ## Commands

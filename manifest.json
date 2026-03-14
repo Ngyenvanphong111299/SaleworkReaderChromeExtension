@@ -16,7 +16,7 @@
     "http://localhost:5153/*"
   ],
   "background": {
-    "service_worker": "background.js",
+    "service_worker": "js/05-background.js",
     "type": "module"
   },
   "action": {

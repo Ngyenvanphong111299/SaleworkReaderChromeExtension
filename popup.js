@@ -11,7 +11,8 @@ document.addEventListener('DOMContentLoaded', () => {
   const statusBadge = document.getElementById('statusBadge');
   const logList = document.getElementById('logList');
   const totalOrdersEl = document.getElementById('totalOrders');
-  const processedOrdersEl = document.getElementById('processedOrders');
+  const totalConversationsEl = document.getElementById('totalConversations');
+  const totalMessagesEl = document.getElementById('totalMessages');
 
   let isProcessing = false;
 
@@ -86,10 +87,12 @@ document.addEventListener('DOMContentLoaded', () => {
       console.log('>>> Response từ background:', response);
 
       if (response?.success) {
-        showStatus('Đã bắt đầu crawl ' + response.count + ' đơn', 'success');
-        addLog('✓ Bắt đầu crawl ' + response.count + ' đơn', 'info');
+        showStatus('Hoàn thành crawl ' + response.count + ' đơn', 'success');
+        addLog('✓ Hoàn thành: ' + response.count + ' đơn, ' + (response.totalConversations ?? 0) + ' hội thoại, ' + (response.totalMessages ?? 0) + ' tin nhắn', 'success');
         totalOrdersEl.textContent = response.count || 0;
-        console.log('>>> Đã set totalOrders = ' + (response.count || 0));
+        if (totalConversationsEl) totalConversationsEl.textContent = response.totalConversations ?? 0;
+        if (totalMessagesEl) totalMessagesEl.textContent = response.totalMessages ?? 0;
+        console.log('>>> Stats:', response);
       } else {
         const err = response?.error || 'Lỗi không xác định';
         showStatus(err, 'error');
@@ -139,9 +142,15 @@ document.addEventListener('DOMContentLoaded', () => {
     addLog('✓ Đã dừng crawl', 'info');
   });
 
-  // Manual Search button
+  // Manual Search - Toggle icon để hiện/ẩn input
+  const manualSearchToggle = document.getElementById('manualSearchToggle');
+  const manualSearchInput = document.getElementById('manualSearchInput');
   const manualSearchBtn = document.getElementById('manualSearchBtn');
   const manualPhoneInput = document.getElementById('manualPhoneInput');
+
+  manualSearchToggle?.addEventListener('click', () => {
+    manualSearchInput?.classList.toggle('hidden');
+  });
 
   manualSearchBtn?.addEventListener('click', async () => {
     const phone = manualPhoneInput?.value?.trim();
@@ -173,7 +182,13 @@ document.addEventListener('DOMContentLoaded', () => {
       addLog('Đang inject script...', 'info');
       await chrome.scripting.executeScript({
         target: { tabId: tabId },
-        files: ['content.js']
+        files: [
+          'content/01-search.js',
+          'content/02-conversation.js',
+          'content/03-scroll.js',
+          'content/04-extract.js',
+          'content/05-main.js'
+        ]
       });
 
       await new Promise(r => setTimeout(r, 1000));
@@ -204,13 +219,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
       if (message.status === 'processing') {
         console.log('>>> Đang xử lý - current:', message.current, 'total:', message.total, 'phone:', message.phone);
-        processedOrdersEl.textContent = message.current;
+        totalOrdersEl.textContent = message.current;
         showStatus('Đang xử lý: ' + message.phone + ' (' + message.current + '/' + message.total + ')', 'processing');
         addLog('>>> Xử lý: ' + message.phone + ' (' + message.current + '/' + message.total + ')', 'info');
       } else if (message.status === 'done') {
-        console.log('>>> Hoàn thành!');
+        console.log('>>> Hoàn thành!', message);
+        totalOrdersEl.textContent = message.totalOrders ?? totalOrdersEl.textContent;
+        if (totalConversationsEl) totalConversationsEl.textContent = message.totalConversations ?? 0;
+        if (totalMessagesEl) totalMessagesEl.textContent = message.totalMessages ?? 0;
         showStatus('Hoàn thành!', 'success');
-        addLog('✓ HOÀN THÀNH!', 'success');
+        addLog('✓ HOÀN THÀNH! Đơn: ' + (message.totalOrders ?? 0) + ' | Hội thoại: ' + (message.totalConversations ?? 0) + ' | Tin nhắn: ' + (message.totalMessages ?? 0), 'success');
         startBtn.disabled = false;
         startBtn.innerHTML = `
           <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
