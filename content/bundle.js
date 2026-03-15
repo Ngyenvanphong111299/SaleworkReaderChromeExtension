@@ -1,0 +1,529 @@
+/**
+ * Salework Crawler - Content Script Bundle
+ * Gộp 5 file thành 1 để tối ưu performance
+ * - 01-search.js
+ * - 02-conversation.js
+ * - 03-scroll.js
+ * - 04-extract.js
+ * - 05-main.js
+ */
+
+// ============ SHARED CONFIG ============
+const DYNAMIC_CONFIG = {
+  minInterval: 300,
+  maxInterval: 1500,
+  scrollMaxInterval: 2000,
+  scrollTimeout: 30000,
+  defaultTimeout: 10000
+};
+
+// ============ DOM CACHE ============
+const domCache = {
+  data: new Map(),
+  get(key, fn) {
+    if (this.data.has(key)) return this.data.get(key);
+    const result = fn();
+    if (result) this.data.set(key, result);
+    return result;
+  },
+  clear() { this.data.clear(); },
+  invalidate(key) { this.data.delete(key); }
+};
+
+// ============ DYNAMIC WAITING UTILS ============
+async function waitForCondition(conditionFn, timeout = DYNAMIC_CONFIG.defaultTimeout, initialInterval = DYNAMIC_CONFIG.minInterval, maxInterval = DYNAMIC_CONFIG.maxInterval) {
+  const startTime = Date.now();
+  let currentInterval = initialInterval;
+
+  while (Date.now() - startTime < timeout) {
+    if (conditionFn()) return true;
+    await new Promise(resolve => setTimeout(resolve, currentInterval));
+    currentInterval = Math.min(currentInterval * 1.3, maxInterval);
+  }
+
+  return conditionFn();
+}
+
+async function waitForElement(selectors, timeout = DYNAMIC_CONFIG.defaultTimeout) {
+  const selectorArray = Array.isArray(selectors) ? selectors : [selectors];
+
+  // Thử ngay lập tức
+  for (const selector of selectorArray) {
+    const el = document.querySelector(selector);
+    if (el) return el;
+  }
+
+  // Chờ với dynamic interval
+  await waitForCondition(
+    () => {
+      for (const selector of selectorArray) {
+        if (document.querySelector(selector)) return true;
+      }
+      return false;
+    },
+    timeout,
+    DYNAMIC_CONFIG.minInterval,
+    DYNAMIC_CONFIG.maxInterval
+  );
+
+  // Trả về kết quả cuối cùng
+  for (const selector of selectorArray) {
+    const el = document.querySelector(selector);
+    if (el) return el;
+  }
+
+  return null;
+}
+
+// ============ MODULE 01: SEARCH ============
+function findSearchInput() {
+  return domCache.get('searchInput', () => {
+    const selectors = [
+      "#conversation-page-v2 > div.z2-conver-list-container > div:nth-child(1) > div.flex-container-line.px-12.pb-2.pt-1 > div > input",
+      "input[placeholder*='tìm']",
+      "input[placeholder*='search']",
+      "input[type='search']",
+      "#conversation-page-v2 input",
+      "input.px-12",
+      ".z2-search-input",
+      "input[class*='search']"
+    ];
+
+    for (const selector of selectors) {
+      try {
+        const input = document.querySelector(selector);
+        if (input) return input;
+      } catch (e) { /* ignore */ }
+    }
+    return null;
+  });
+}
+
+function fillPhoneNumber(phoneNumber) {
+  domCache.clear();
+  const input = findSearchInput();
+
+  if (input) {
+    input.value = '';
+    input.value = phoneNumber;
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+    input.dispatchEvent(new Event('blur', { bubbles: true }));
+    return true;
+  }
+  return false;
+}
+
+function findAndClickSearchButton() {
+  return domCache.get('searchButton', () => {
+    const searchSelectors = [
+      'button[type="submit"]',
+      '#conversation-page-v2 button',
+      'button i[class*="search"]',
+      '.z2-search-button',
+      'button[class*="search"]',
+      'button:has(i[class*="search"])',
+      '.z2-conver-list-container button'
+    ];
+
+    for (const selector of searchSelectors) {
+      try {
+        const btn = document.querySelector(selector);
+        if (btn) return btn;
+      } catch (e) { /* ignore */ }
+    }
+    return null;
+  });
+}
+
+// ============ MODULE 02: CONVERSATION ============
+function findAllConversations() {
+  domCache.invalidate('allConvs');
+
+  const convList = document.querySelector('.z2-conversation-list') ||
+    document.querySelector('.z2-conver-list-container .z2-conversation-list');
+
+  if (!convList) return [];
+
+  let allConvs = convList.querySelectorAll('.z2-conv-item-container');
+  if (allConvs.length === 0) allConvs = convList.querySelectorAll('[class*="conv-item-container"]');
+  if (allConvs.length === 0) allConvs = convList.querySelectorAll('.pointer.hover-highlight.border-bottom');
+  if (allConvs.length === 0) allConvs = convList.querySelectorAll(':scope > div > div.pointer');
+  if (allConvs.length === 0) allConvs = convList.querySelectorAll(':scope > div > div');
+
+  if (allConvs.length === 0) {
+    const nameEls = convList.querySelectorAll('.name-conversation');
+    const rows = [];
+    nameEls.forEach(el => {
+      const row = el.closest('.z2-conv-item-container') ||
+        el.closest('.pointer.hover-highlight') ||
+        el.closest('[class*="conv-item"]') ||
+        el.closest('.border-bottom.pointer');
+      if (row && !rows.includes(row)) rows.push(row);
+    });
+    allConvs = rows;
+  }
+
+  let result = Array.from(allConvs).filter(el =>
+    !el.querySelector('input[type="search"], input[placeholder*="tìm"], input[placeholder*="search"]')
+  );
+  if (result.length === 0 && allConvs.length > 0) result = Array.from(allConvs);
+
+  if (result.length > 0) domCache.data.set('allConvs', result);
+
+  return result;
+}
+
+async function clickConversation(conv, index, total) {
+  conv.click();
+
+  await waitForCondition(
+    () => document.querySelector('.z2-message-container, [class*="message-container"]') !== null,
+    8000,
+    500,
+    1500
+  );
+}
+
+// ============ MODULE 03: SCROLL ============
+function getMessageCount() {
+  let containers = document.querySelectorAll('.z2-message-container');
+  if (containers.length === 0) containers = document.querySelectorAll('[class*="message-container"]');
+  if (containers.length === 0) containers = document.querySelectorAll('div[class*="z2-message"]');
+  return containers.length;
+}
+
+async function scrollUpToLoadMessages() {
+  await waitForCondition(
+    () => document.querySelectorAll('.z2-message-container').length > 0,
+    8000,
+    500,
+    1500
+  );
+
+  await new Promise(r => setTimeout(r, 500));
+
+  let scrollContainer = document.querySelector("#conversation-page-v2 > div.d-flex.flex-grow-1 > div.d-flex.flex-grow-1.flex-column.justify-content-between.border-right > div.z2-conversation-body.scrollbar.pt-5");
+  let fallbackContainer = document.querySelector('.z2-conversation-body');
+  let currentContainer = scrollContainer || fallbackContainer;
+
+  if (!currentContainer) {
+    currentContainer = document.querySelector('.z2-conversation-body, [class*="conversation-body"], .scrollbar');
+  }
+
+  if (!currentContainer) {
+    if (chrome.runtime) chrome.runtime.sendMessage({ type: 'CONTENT_LOG', text: 'KHONG tim thay scroll container!', logType: 'error' });
+    return;
+  }
+
+  let lastCount = 0;
+  let noChangeCount = 0;
+  let i = 0;
+  const MAX_NO_CHANGE = 5;
+  const MAX_SCROLL_ATTEMPTS = 100;
+
+  while (true) {
+    i++;
+    const countBefore = getMessageCount();
+
+    currentContainer.scrollTop = 0;
+
+    let hasProgress = await waitForCondition(
+      () => getMessageCount() > countBefore,
+      5000,
+      500,
+      DYNAMIC_CONFIG.scrollMaxInterval
+    );
+
+    const countAfter = getMessageCount();
+
+    if (countAfter === countBefore || !hasProgress) {
+      noChangeCount++;
+      if (noChangeCount >= MAX_NO_CHANGE) break;
+    } else {
+      noChangeCount = 0;
+    }
+
+    lastCount = countAfter;
+
+    if (i >= MAX_SCROLL_ATTEMPTS) break;
+  }
+}
+
+// ============ MODULE 04: EXTRACT ============
+function extractMessages() {
+  const messages = [];
+  const allContainers = document.querySelectorAll('.z2-message-container');
+
+  allContainers.forEach((container, index) => {
+    try {
+      // Timestamp marker
+      const timestampMarker = container.querySelector('div.w-100.text-center span');
+      if (timestampMarker) {
+        const dateTime = timestampMarker.textContent.trim();
+        if (dateTime) {
+          messages.push({
+            id: 'timestamp_' + index,
+            content: dateTime,
+            time: dateTime,
+            type: 'timestamp',
+            messageType: 'timestamp'
+          });
+        }
+        return;
+      }
+
+      const isRight = container.querySelector('.z2-message-item-right-container') !== null;
+      const msgType = isRight ? 'sent' : 'received';
+
+      let time = '';
+      const footerEl = container.querySelector('.z2-message-item-right-footer') || container.querySelector('.z2-message-item-left-footer');
+      if (footerEl) {
+        const timeEl = footerEl.querySelector('.el-tooltip');
+        if (timeEl) time = timeEl.textContent.trim();
+      }
+
+      const msgId = container.id || 'msg_' + index;
+
+      // Quoted content
+      const quotedContentEl = container.querySelector('.z2-message-reply-quoted-content');
+      const quotedSenderEl = container.querySelector('.z2-message-reply-quoted-sender');
+      const quotedContent = quotedContentEl?.textContent?.trim();
+      const quotedSender = quotedSenderEl?.textContent?.trim();
+
+      // Message content
+      let content = '';
+      let textEl = container.querySelector('.z2-message-item-right-content span[id="regexText"]');
+      if (!textEl) textEl = container.querySelector('.z2-message-item-left-content span[id="regexText"]');
+      if (!textEl) textEl = container.querySelector('.z2-message-item-right .mb-0.text-normal span');
+      if (!textEl) textEl = container.querySelector('.z2-message-item-left .mb-0.text-normal span');
+      if (!textEl) {
+        const contentDiv = container.querySelector('.z2-message-item-right-content, .z2-message-item-left-content');
+        if (contentDiv) {
+          const spans = contentDiv.querySelectorAll('span');
+          for (const span of spans) {
+            const text = span.textContent?.trim();
+            if (text && text.length > 0 && !text.includes('Trả lời') && !text.includes('Chuyển tiếp') &&
+                !text.includes('Ghim') && !text.includes('Copy') && !text.includes('Xoá') &&
+                !text.includes('Lưu ảnh') && !text.includes('Chọn nhiều') && !text.includes('Thu hồi')) {
+              textEl = span;
+              break;
+            }
+          }
+        }
+      }
+
+      if (textEl) content = textEl.textContent.trim();
+
+      // Images
+      const imageUrls = [];
+      const isMultiImage = container.querySelector('.group-img-container') !== null;
+
+      if (isMultiImage) {
+        const imgs = container.querySelectorAll('.group-img-container img');
+        imgs.forEach(img => {
+          const src = img.src || img.getAttribute('src');
+          if (src && !src.includes('emoji') && !src.includes('icon') && !src.includes('three_dots')) {
+            imageUrls.push(src);
+          }
+        });
+      }
+
+      if (imageUrls.length === 0) {
+        const photoContainer = container.querySelector('.photo-container');
+        if (photoContainer) {
+          const imgSelectors = ['img.el-image__preview', 'img.el-image__inner', 'img[src]'];
+          for (const sel of imgSelectors) {
+            const imageEl = photoContainer.querySelector(sel);
+            if (imageEl) {
+              const src = imageEl.src || imageEl.getAttribute('src');
+              if (src && !src.includes('emoji') && !src.includes('icon')) {
+                imageUrls.push(src);
+                break;
+              }
+            }
+          }
+        }
+      }
+      if (imageUrls.length === 0) {
+        const elImage = container.querySelector('.el-image img');
+        if (elImage) {
+          const src = elImage.src || elImage.getAttribute('src');
+          if (src && !src.includes('emoji') && !src.includes('icon')) imageUrls.push(src);
+        }
+      }
+      if (imageUrls.length === 0) {
+        const allImages = container.querySelectorAll('img');
+        for (const img of allImages) {
+          const src = img.src || img.getAttribute('src');
+          if (src && !src.includes('emoji') && !src.includes('icon') && !src.includes('three_dots')) {
+            imageUrls.push(src);
+            break;
+          }
+        }
+      }
+
+      let imageUrl = '';
+      if (imageUrls.length === 1) {
+        imageUrl = imageUrls[0];
+      } else if (imageUrls.length > 1) {
+        imageUrl = JSON.stringify(imageUrls);
+      }
+
+      if (imageUrl && !content) content = '[Hình ảnh]';
+
+      if (content || imageUrl) {
+        messages.push({
+          id: msgId,
+          content: content,
+          time: time,
+          type: msgType,
+          messageType: imageUrl ? 'image' : 'text',
+          imageUrl: imageUrl || undefined,
+          quotedContent: quotedContent,
+          quotedSender: quotedSender
+        });
+      }
+    } catch (e) {
+      console.log('>>> [EXTRACT] Lỗi:', e.message);
+    }
+  });
+
+  return messages;
+}
+
+// ============ MODULE 05: MAIN FLOW ============
+window.__extractedMessages = [];
+window.__extractedPhone = '';
+
+var MAX_RETRIES = 5;
+var POLL_INTERVAL_MS = 1500;
+var BETWEEN_CONV_MS = 1000;
+var INITIAL_WAIT_MS = 1500;
+
+async function waitForConversationsLoaded() {
+  await new Promise(r => setTimeout(r, INITIAL_WAIT_MS));
+
+  for (let i = 1; i <= MAX_RETRIES; i++) {
+    const allConvs = findAllConversations();
+    if (allConvs.length > 0) return allConvs;
+    if (i < MAX_RETRIES) await new Promise(r => setTimeout(r, POLL_INTERVAL_MS));
+  }
+  return [];
+}
+
+function fillAndSearchAndClick(phoneNumber) {
+  return new Promise(function (resolve) {
+    let currentRetry = 0;
+
+    async function doSearchAndCrawl() {
+      const inputFilled = fillPhoneNumber(phoneNumber);
+      if (!inputFilled) return null;
+
+      const buttonClicked = findAndClickSearchButton();
+      if (!buttonClicked) {
+        buttonClicked?.click();
+      }
+
+      const allConvs = await waitForConversationsLoaded();
+      if (allConvs.length === 0) return [];
+
+      return allConvs;
+    }
+
+    async function retrySearch() {
+      if (currentRetry >= MAX_RETRIES) {
+        const errMsg = 'Khong tim thay conversation sau ' + MAX_RETRIES + ' lan thu';
+        resolve({ success: false, messages: [], error: errMsg });
+        return;
+      }
+
+      currentRetry++;
+      const allConvs = await doSearchAndCrawl();
+
+      if (!allConvs) {
+        setTimeout(retrySearch, 1000);
+        return;
+      }
+
+      if (allConvs.length === 0) {
+        setTimeout(retrySearch, 1000);
+        return;
+      }
+
+      const allMessages = [];
+
+      for (let convIdx = 0; convIdx < allConvs.length; convIdx++) {
+        await clickConversation(allConvs[convIdx], convIdx, allConvs.length);
+        await scrollUpToLoadMessages();
+
+        const messages = extractMessages();
+
+        const staffNameEl = allConvs[convIdx].querySelector('[class*="name"], [class*="staff"]');
+        const staffName = staffNameEl?.textContent?.trim() || 'Conversation ' + (convIdx + 1);
+
+        const messagesWithStaff = messages.map(msg => ({ ...msg, staffName: staffName }));
+        allMessages.push(...messagesWithStaff);
+
+        if (convIdx < allConvs.length - 1) {
+          await new Promise(r => setTimeout(r, BETWEEN_CONV_MS));
+        }
+      }
+
+      window.__extractedPhone = phoneNumber;
+      resolve({ success: true, messages: allMessages, conversationsCount: allConvs.length });
+    }
+
+    retrySearch();
+  });
+}
+
+// ============ MESSAGE LISTENER ============
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.type === 'FILL_PHONE') {
+    const success = fillPhoneNumber(message.phoneNumber);
+    sendResponse({ success: success });
+  }
+
+  if (message.type === 'FILL_AND_SEARCH') {
+    fillAndSearchAndClick(message.phoneNumber).then(function (result) {
+      sendResponse(result);
+    });
+    return true;
+  }
+
+  if (message.type === 'EXTRACT_MESSAGES') {
+    setTimeout(() => {
+      scrollUpToLoadMessages().then(() => {
+        const messages = extractMessages();
+        window.__extractedMessages = messages;
+        sendResponse({ success: true, messages: messages });
+      });
+    }, 2000);
+    return true;
+  }
+
+  if (message.type === 'GET_EXTRACTED_MESSAGES') {
+    sendResponse({ success: true, messages: window.__extractedMessages || [] });
+    return true;
+  }
+
+  return true;
+});
+
+// Export for debugging
+window.__crawlerBundle = {
+  findSearchInput,
+  fillPhoneNumber,
+  findAndClickSearchButton,
+  findAllConversations,
+  clickConversation,
+  scrollUpToLoadMessages,
+  getMessageCount,
+  extractMessages,
+  fillAndSearchAndClick
+};
+
+console.log('========================================');
+console.log('=== Content Script Bundle: SẴN SÀNG ===');
+console.log('========================================');

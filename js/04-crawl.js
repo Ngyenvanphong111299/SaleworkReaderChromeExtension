@@ -1,4 +1,4 @@
-// Step 04: Logic crawl - processPhone, startCrawl
+// Step 04: Logic crawl - processPhone, startCrawl (Optimized)
 
 import { TIMING } from './01-config.js';
 import { logToPopup } from './02-utils.js';
@@ -47,15 +47,11 @@ export async function processPhone(phoneNumber) {
     }
 
     logToPopup('Dang inject script...', 'info');
+
+    // Optimized: Inject 1 bundle thay vì 5 files riêng biệt
     await chrome.scripting.executeScript({
       target: { tabId: tabId },
-      files: [
-        'content/01-search.js',
-        'content/02-conversation.js',
-        'content/03-scroll.js',
-        'content/04-extract.js',
-        'content/05-main.js'
-      ]
+      files: ['content/bundle.js']
     });
 
     await new Promise(r => setTimeout(r, TIMING.SCRIPT_INJECT_DELAY));
@@ -100,7 +96,7 @@ export async function processPhone(phoneNumber) {
 export async function startCrawl() {
   console.log('');
   console.log('==============================================================');
-  console.log('  [START] BAT DAU CRAWL                               ');
+  console.log('  [START] BAT DAU CRAWL (OPTIMIZED)                      ');
   console.log('==============================================================');
 
   if (isProcessing) {
@@ -156,7 +152,8 @@ export async function startCrawl() {
       logToPopup('Khong co tin nhan de luu', 'warn');
     }
 
-    logToPopup('Doi 2s roi tiep tuc...', 'info');
+    // Sử dụng dynamic delay thay vì fixed
+    logToPopup('Doi ' + (TIMING.BETWEEN_ORDERS / 1000) + 's roi tiep tuc...', 'info');
     await new Promise(r => setTimeout(r, TIMING.BETWEEN_ORDERS));
 
     currentPhoneNumber = null;

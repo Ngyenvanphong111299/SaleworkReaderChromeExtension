@@ -1,22 +1,79 @@
-// Step 03: API functions - gọi backend
+// Step 03: API functions - gọi backend với timeout và retry
 
-import { API_BASE } from './01-config.js';
+import { API_BASE, TIMING } from './01-config.js';
 import { logToPopup, getPhoneFromOrder } from './02-utils.js';
 
-export async function fetchOneOrder(maxRetries = 50) {
+/**
+ * Fetch với timeout và AbortController
+ * @param {string} url - URL cần fetch
+ * @param {object} options - Fetch options
+ * @param {number} timeout - Timeout (ms)
+ * @returns {Promise<Response>}
+ */
+async function fetchWithTimeout(url, options = {}, timeout = 15000) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeout);
+
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal
+    });
+    clearTimeout(timeoutId);
+    return response;
+  } catch (error) {
+    clearTimeout(timeoutId);
+    if (error.name === 'AbortError') {
+      throw new Error(`Request timeout after ${timeout}ms`);
+    }
+    throw error;
+  }
+}
+
+/**
+ * Fetch với retry logic
+ * @param {string} url - URL cần fetch
+ * @param {object} options - Fetch options
+ * @param {number} maxRetries - Số lần retry tối đa
+ * @param {number} baseDelay - Delay cơ bản (ms)
+ */
+async function fetchWithRetry(url, options = {}, maxRetries = 3, baseDelay = 1000) {
+  let lastError;
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await fetchWithTimeout(url, options);
+    } catch (error) {
+      lastError = error;
+
+      if (attempt < maxRetries) {
+        // Exponential backoff với jitter
+        const delay = baseDelay * Math.pow(2, attempt) * (0.5 + Math.random() * 0.5);
+        console.log(`>>> [API] Retry ${attempt + 1}/${maxRetries} after ${Math.round(delay)}ms:`, error.message);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
+  }
+
+  throw lastError;
+}
+
+export async function fetchOneOrder(maxRetries = 5) {
   console.log('');
   console.log('==============================================================');
   console.log('  [API] LAY 1 DON DE XU LY                           ');
   console.log('==============================================================');
 
-  let retries = 0;
+  const retryCount = { current: 0 };
 
-  while (retries < maxRetries) {
+  async function attemptFetch() {
+    retryCount.current++;
+
+    const url = API_BASE + '/salework/erp/orders/uncrawled?limit=1';
+    console.log('>>> [API] URL:', url);
+
     try {
-      const url = API_BASE + '/salework/erp/orders/uncrawled?limit=1';
-      console.log('>>> [API] URL:', url);
-
-      const response = await fetch(url);
+      const response = await fetchWithRetry(url, {}, 3, 800);
       console.log('>>> [API] Response status:', response.status);
 
       if (!response.ok) {
@@ -39,15 +96,19 @@ export async function fetchOneOrder(maxRetries = 50) {
       console.log('>>> [API] PhoneNumber:', phoneNumber, '| Order:', JSON.stringify(order).substring(0, 200));
 
       if (!phoneNumber || phoneNumber.length === 0) {
-        retries++;
-        logToPopup('Don ' + retries + ' - SDT rong (bo qua)...', 'warn');
+        logToPopup('Don ' + retryCount.current + ' - SDT rong (bo qua)...', 'warn');
 
         const skipOrderId = order.id || order.Id;
         if (skipOrderId) {
           await markOrderAsCrawled(skipOrderId, 0);
         }
         console.log('>>> [API] Skip don rong, tiep tuc lay don khac...');
-        continue;
+
+        // Recursive retry với maxRetries thay vì loop
+        if (retryCount.current < maxRetries) {
+          return attemptFetch();
+        }
+        return null;
       }
 
       logToPopup('Don tiep theo - SDT: ' + phoneNumber, 'info');
@@ -55,13 +116,20 @@ export async function fetchOneOrder(maxRetries = 50) {
 
     } catch (e) {
       console.log('>>> [API] Loi:', e.message);
+
+      if (retryCount.current < maxRetries) {
+        logToPopup('Loi API: ' + e.message + ', thu lai...', 'error');
+        const delay = 1000 * Math.pow(2, retryCount.current - 1);
+        await new Promise(resolve => setTimeout(resolve, delay));
+        return attemptFetch();
+      }
+
       logToPopup('Loi API: ' + e.message, 'error');
       return null;
     }
   }
 
-  logToPopup('Khong tim thay don nao voi SDT!', 'error');
-  return null;
+  return attemptFetch();
 }
 
 export async function saveMessages(phoneNumber, messages) {
@@ -80,11 +148,16 @@ export async function saveMessages(phoneNumber, messages) {
     };
     console.log('>>> [API] Request body:', JSON.stringify(requestBody).substring(0, 500));
 
-    const response = await fetch(API_BASE + '/salework/messages', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(requestBody)
-    });
+    const response = await fetchWithRetry(
+      API_BASE + '/salework/messages',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody)
+      },
+      3,
+      1000
+    );
 
     console.log('>>> [API] Response status:', response.status);
 
@@ -108,11 +181,16 @@ export async function markOrderAsCrawled(orderId, messageCount) {
   console.log('>>> [API] Danh dau da crawl cho orderId:', orderId);
 
   try {
-    const response = await fetch(API_BASE + '/salework/orders/crawled', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ orderId: orderId, messageCount: messageCount })
-    });
+    const response = await fetchWithRetry(
+      API_BASE + '/salework/orders/crawled',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ orderId: orderId, messageCount: messageCount })
+      },
+      2,
+      500
+    );
 
     if (!response.ok) {
       throw new Error('API error: ' + response.status);
