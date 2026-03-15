@@ -313,11 +313,26 @@ function extractMessageData(container, index) {
 
   const msgId = container.id || 'msg_' + index;
 
-  // Quoted content
+  // Quoted content - hỗ trợ 2 loại class
+  let quotedContent = null;
+  let quotedSender = null;
+
+  // Loại 1: .z2-message-reply-quoted-content
   const quotedContentEl = container.querySelector('.z2-message-reply-quoted-content');
   const quotedSenderEl = container.querySelector('.z2-message-reply-quoted-sender');
-  const quotedContent = quotedContentEl?.textContent?.trim();
-  const quotedSender = quotedSenderEl?.textContent?.trim();
+  if (quotedContentEl) quotedContent = quotedContentEl.textContent?.trim();
+  if (quotedSenderEl) quotedSender = quotedSenderEl.textContent?.trim();
+
+  // Loại 2: .border-answer (cấu trúc mới)
+  if (!quotedContent || !quotedSender) {
+    const borderAnswer = container.querySelector('.border-answer');
+    if (borderAnswer) {
+      const senderEl = borderAnswer.querySelector('.fw-semibold');
+      const contentEl = borderAnswer.querySelector('.mb-0.text-normal');
+      if (senderEl && !quotedSender) quotedSender = senderEl.textContent?.trim();
+      if (contentEl && !quotedContent) quotedContent = contentEl.textContent?.trim();
+    }
+  }
 
   // Message content
   let content = '';
