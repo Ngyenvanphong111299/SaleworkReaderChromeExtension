@@ -1,5 +1,9 @@
 // Step 01: Tìm và thao tác ô search, nút search với DOM caching
 
+function logToUI(text, logType) {
+  try { chrome.runtime.sendMessage({ type: 'CONTENT_LOG', text: String(text), logType: logType || 'info' }); } catch (_) {}
+}
+
 // Import dynamic waiting từ config (inline vì đây là content script)
 const DYNAMIC_CONFIG = {
   minInterval: 300,
@@ -32,12 +36,10 @@ const domCache = {
   clear() { this.data.clear(); }
 };
 
-console.log('>>> [CONTENT] 01-search.js loaded');
+logToUI('[CONTENT] 01-search.js loaded');
 
 function findSearchInput() {
-  console.log('');
-  console.log('>>> [FIND_INPUT] Bắt đầu tìm ô input search...');
-  console.log('>>> [FIND_INPUT] URL hiện tại:', window.location.href);
+  logToUI('[FIND_INPUT] Bắt đầu tìm ô input search...');
 
   // Sử dụng cache để tránh query lại
   return domCache.get('searchInput', () => {
@@ -56,11 +58,11 @@ function findSearchInput() {
       try {
         const input = document.querySelector(selector);
         if (input) {
-          console.log('>>> [FIND_INPUT] ✓ Tìm thấy input với selector:', selector);
+          logToUI('[FIND_INPUT] Tìm thấy input');
           return input;
         }
       } catch (e) {
-        console.log('>>> [FIND_INPUT] Lỗi với selector:', selector, e.message);
+        logToUI('[FIND_INPUT] Lỗi selector: ' + e.message, 'warn');
       }
     }
     return null;
@@ -68,17 +70,14 @@ function findSearchInput() {
 }
 
 function fillPhoneNumber(phoneNumber) {
-  console.log('');
-  console.log('>>> [FILL_PHONE] Bắt đầu nhập số điện thoại:', phoneNumber);
-
-  chrome.runtime.sendMessage({ type: 'CONTENT_LOG', text: 'Dang tim input...', logType: 'info' });
+  logToUI('[FILL_PHONE] Bắt đầu nhập SĐT: ' + phoneNumber);
 
   // Clear cache trước khi tìm lại
   domCache.clear();
   const input = findSearchInput();
 
   if (input) {
-    chrome.runtime.sendMessage({ type: 'CONTENT_LOG', text: 'DA TIM THAY INPUT!', logType: 'info' });
+    logToUI('Đã tìm thấy input');
 
     input.value = '';
     input.value = phoneNumber;
@@ -86,20 +85,16 @@ function fillPhoneNumber(phoneNumber) {
     input.dispatchEvent(new Event('change', { bubbles: true }));
     input.dispatchEvent(new Event('blur', { bubbles: true }));
 
-    console.log('>>> [FILL_PHONE] ✓ HOÀN THÀNH nhập số!');
-    chrome.runtime.sendMessage({ type: 'CONTENT_LOG', text: 'Da dien SDT: ' + phoneNumber, logType: 'info' });
+    logToUI('Đã nhập SĐT: ' + phoneNumber, 'success');
     return true;
   }
 
-  console.log('>>> [FILL_PHONE] ✗ KHÔNG THỂ nhập số - không tìm thấy input');
-  chrome.runtime.sendMessage({ type: 'CONTENT_LOG', text: 'KHONG TIM THAY INPUT!', logType: 'error' });
+  logToUI('Không tìm thấy input để nhập số', 'error');
   return false;
 }
 
 function findAndClickSearchButton() {
-  console.log('');
-  console.log('>>> [FIND_BUTTON] Bắt đầu tìm nút search...');
-  chrome.runtime.sendMessage({ type: 'CONTENT_LOG', text: 'Dang tim nut search...', logType: 'info' });
+  logToUI('[FIND_BUTTON] Đang tìm nút search...');
 
   // Sử dụng cache
   return domCache.get('searchButton', () => {
@@ -117,11 +112,11 @@ function findAndClickSearchButton() {
       try {
         const btn = document.querySelector(selector);
         if (btn) {
-          console.log('>>> [FIND_BUTTON] ✓ Tìm thấy button với selector:', selector);
+          logToUI('[FIND_BUTTON] Tìm thấy nút search');
           return btn;
         }
       } catch (e) {
-        console.log('>>> [FIND_BUTTON] Lỗi với selector:', selector, e.message);
+        logToUI('[FIND_BUTTON] Lỗi selector: ' + e.message, 'warn');
       }
     }
     return null;

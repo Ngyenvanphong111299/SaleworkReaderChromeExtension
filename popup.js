@@ -1,14 +1,11 @@
 // Sidebar popup script (v2.1 - Enhanced with Progress & Error Recovery)
 
-console.log('=== Popup v2.1: Đã tải ===');
-
 // ============ CONFIG ============
 const MAX_LOG_ITEMS = 100;
+const API_BASE = 'http://localhost:5153/api/v1';
 const PROGRESS_ESTIMATE_SAMPLES = 5; // Số mẫu để tính ETA
 
 document.addEventListener('DOMContentLoaded', () => {
-  console.log('>>> Popup DOMContentLoaded');
-
   // UI Elements
   const startBtn = document.getElementById('startBtn');
   const stopBtn = document.getElementById('stopBtn');
@@ -110,7 +107,6 @@ document.addEventListener('DOMContentLoaded', () => {
    * Add log với memory leak protection
    */
   function addLog(message, type = 'info') {
-    console.log('[LOG] ' + message);
     const now = new Date();
     const time = now.toLocaleTimeString('vi-VN', { hour12: false });
     const logItem = document.createElement('div');
@@ -142,8 +138,6 @@ document.addEventListener('DOMContentLoaded', () => {
     } else {
       statusBadge.textContent = 'Sẵn sàng';
     }
-
-    console.log('[STATUS] ' + message + ' (' + type + ')');
   }
 
   function escapeHtml(text) {
@@ -153,6 +147,46 @@ document.addEventListener('DOMContentLoaded', () => {
     return div.innerHTML;
   }
 
+  /**
+   * Build API payload và hiển thị trong UI (Manual Search)
+   * Cấu trúc conversations: mỗi hội thoại có staffName và messages riêng
+   */
+  function showApiDataPreview(phoneNumber, conversations) {
+    const cleanMsg = (m) => {
+      const msg = { ...m };
+      if (msg.imageUrl === undefined || msg.imageUrl === '') delete msg.imageUrl;
+      if (msg.quotedContent === undefined || msg.quotedContent === '') delete msg.quotedContent;
+      if (msg.quotedSender === undefined || msg.quotedSender === '') delete msg.quotedSender;
+      return msg;
+    };
+
+    const apiPayload = {
+      phoneNumber: phoneNumber,
+      conversations: conversations.map(c => ({
+        staffName: c.staffName,
+        messages: c.messages.map(cleanMsg)
+      })),
+      replaceExisting: true
+    };
+
+    const apiDataCard = document.getElementById('apiDataCard');
+    const apiDataSummary = document.getElementById('apiDataSummary');
+    const apiDataBody = document.getElementById('apiDataBody');
+
+    if (!apiDataCard || !apiDataSummary || !apiDataBody) return;
+
+    const totalMessages = conversations.reduce((sum, c) => sum + c.messages.length, 0);
+    apiDataSummary.textContent = phoneNumber + ' • ' + totalMessages + ' tin nhắn • ' + conversations.length + ' hội thoại';
+    apiDataBody.textContent = JSON.stringify(apiPayload, null, 2);
+    apiDataBody.classList.remove('hidden');
+    apiDataCard.classList.add('show');
+  }
+
+  function hideApiDataPreview() {
+    const apiDataCard = document.getElementById('apiDataCard');
+    if (apiDataCard) apiDataCard.classList.remove('show');
+  }
+
   // Clear log
   document.getElementById('clearLogBtn').addEventListener('click', () => {
     logList.innerHTML = '';
@@ -160,11 +194,10 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   addLog('✓ Đã tải Sidebar v2.1', 'info');
-  console.log('>>> UI elements initialized');
 
   // ============ START CRAWL ============
   startBtn.addEventListener('click', async () => {
-    console.log('>>> Click nút Bắt Đầu Crawl');
+    addLog('Bắt đầu crawl...', 'info');
 
     startBtn.disabled = true;
     startBtn.innerHTML = '<span class="spinner"></span>Đang khởi động...';
@@ -201,7 +234,6 @@ document.addEventListener('DOMContentLoaded', () => {
         resetStartButton();
       }
     } catch (e) {
-      console.log('>>> Exception:', e);
       showStatus('Lỗi: ' + e.message, 'error');
       addLog('✗ EXCEPTION: ' + e.message, 'error');
 
@@ -227,8 +259,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // ============ STOP CRAWL ============
   stopBtn.addEventListener('click', async () => {
-    console.log('>>> Click nút Dừng Lại');
-    addLog('>>> Đang dừng crawl...', 'warn');
+    addLog('Đang dừng crawl...', 'warn');
     await chrome.runtime.sendMessage({ type: 'STOP_CRAWL' });
     isProcessing = false;
     resetStartButton();
@@ -269,11 +300,6 @@ document.addEventListener('DOMContentLoaded', () => {
     phone = phone.replace(/\D/g, '');
     if (phone.startsWith('84')) phone = '0' + phone.substring(2);
 
-    if (!isValidPhoneNumber(phone)) {
-      addLog('Số điện thoại không hợp lệ!', 'error');
-      return;
-    }
-
     addLog('>>> Manual search: ' + phone, 'info');
 
     try {
@@ -302,22 +328,44 @@ document.addEventListener('DOMContentLoaded', () => {
       addLog('Đang search SDT: ' + phone, 'info');
 
       try {
-        // Gửi message và đợi response
         const response = await chrome.tabs.sendMessage(tabId, {
           type: 'FILL_AND_SEARCH',
           phoneNumber: phone
         });
 
-        console.log('>>> Response from content:', response);
-        addLog('Phản hồi: ' + JSON.stringify(response)?.substring(0, 100), response?.success ? 'success' : 'warn');
+        addLog('Phản hồi: ' + (response?.success ? 'OK' : (response?.error || 'Lỗi')), response?.success ? 'success' : 'warn');
 
         if (response?.success) {
-          addLog('Hoàn thành! ' + response.messages?.length + ' tin nhắn, ' + response.conversationsCount + ' hội thoại', 'success');
+          const convs = response.conversations || [];
+          const totalMsg = convs.reduce((s, c) => s + (c.messages?.length || 0), 0);
+          addLog('Hoàn thành! ' + totalMsg + ' tin nhắn, ' + convs.length + ' hội thoại', 'success');
+          showApiDataPreview(phone, convs);
+
+          // Gọi preview API để test (không lưu DB)
+          try {
+            const previewRes = await fetch(API_BASE + '/salework/messages/preview', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                phoneNumber: phone,
+                conversations: convs,
+                replaceExisting: true
+              })
+            });
+            if (previewRes.ok) {
+              const previewData = await previewRes.json();
+              addLog('Preview API OK: ' + previewData.totalMessages + ' tin nhắn, ' + previewData.conversationsCount + ' hội thoại', 'success');
+            } else {
+              addLog('Preview API lỗi: ' + previewRes.status, 'warn');
+            }
+          } catch (e) {
+            addLog('Preview API: ' + e.message, 'warn');
+          }
         } else if (response?.error) {
           addLog('Lỗi: ' + response.error, 'error');
+          hideApiDataPreview();
         }
       } catch (e) {
-        console.log('>>> SendMessage error:', e);
         if (e.message?.includes('No message received')) {
           addLog('Content script không phản hồi!', 'error');
         } else if (e.message?.includes('Could not establish connection')) {
@@ -325,16 +373,27 @@ document.addEventListener('DOMContentLoaded', () => {
         } else {
           addLog('Lỗi: ' + e.message, 'error');
         }
+        hideApiDataPreview();
       }
     } catch (e) {
       addLog('Lỗi: ' + e.message, 'error');
+      hideApiDataPreview();
+    }
+  });
+
+  // API Data Preview - Copy button
+  document.getElementById('apiDataCopyBtn')?.addEventListener('click', () => {
+    const apiDataBody = document.getElementById('apiDataBody');
+    const text = apiDataBody?.textContent;
+    if (text && !text.includes('Chạy Test SDT')) {
+      navigator.clipboard.writeText(text).then(() => {
+        addLog('Đã copy JSON vào clipboard', 'success');
+      }).catch(() => addLog('Không copy được', 'error'));
     }
   });
 
   // ============ MESSAGE LISTENER ============
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    console.log('>>> Popup nhận message:', message);
-
     if (message.type === 'LOG_MESSAGE') {
       addLog(message.message, message.logType || 'info');
     }
@@ -399,5 +458,5 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  console.log('>>> Popup sẵn sàng');
+  addLog('Popup sẵn sàng', 'info');
 });

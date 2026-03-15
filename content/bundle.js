@@ -189,14 +189,53 @@ function findAllConversations() {
 }
 
 async function clickConversation(conv, index, total) {
-  conv.click();
+  if (chrome?.runtime) {
+    chrome.runtime.sendMessage({ type: 'CONTENT_LOG', text: 'Click vao conversation ' + (index + 1) + '/' + total + '...', logType: 'info' });
+  }
 
-  await waitForCondition(
+  conv.scrollIntoView({ block: 'center', behavior: 'instant' });
+  await new Promise(r => setTimeout(r, 300));
+
+  function doClick(el) {
+    const opts = { bubbles: true, cancelable: true, view: window };
+    el.dispatchEvent(new MouseEvent('mousedown', opts));
+    el.dispatchEvent(new MouseEvent('mouseup', opts));
+    el.dispatchEvent(new MouseEvent('click', opts));
+  }
+
+  doClick(conv);
+
+  let found = await waitForCondition(
     () => document.querySelector('.z2-message-container, [class*="message-container"]') !== null,
     8000,
-    500,
-    1500
+    300,
+    1200
   );
+
+  if (!found) {
+    const altTarget = conv.querySelector('.name-conversation') || conv.querySelector('.z2-avatar-container') || conv.querySelector('.pointer');
+    if (altTarget && altTarget !== conv) {
+      if (chrome?.runtime) chrome.runtime.sendMessage({ type: 'CONTENT_LOG', text: 'Thu click vao name/avatar...', logType: 'warn' });
+      doClick(altTarget);
+      await new Promise(r => setTimeout(r, 500));
+      found = await waitForCondition(
+        () => document.querySelector('.z2-message-container, [class*="message-container"]') !== null,
+        6000,
+        300,
+        1200
+      );
+    }
+  }
+
+  if (chrome?.runtime) {
+    chrome.runtime.sendMessage({
+      type: 'CONTENT_LOG',
+      text: found ? 'Da load conversation ' + (index + 1) : 'CHUA thay message container - click co the khong hoat dong',
+      logType: found ? 'info' : 'warn'
+    });
+  }
+
+  if (!found) await new Promise(r => setTimeout(r, 1500));
 }
 
 // ============ MODULE 03: SCROLL ============
@@ -205,6 +244,24 @@ function getMessageCount() {
   if (containers.length === 0) containers = document.querySelectorAll('[class*="message-container"]');
   if (containers.length === 0) containers = document.querySelectorAll('div[class*="z2-message"]');
   return containers.length;
+}
+
+function findScrollContainer() {
+  const body = document.querySelector('.z2-conversation-body, [class*="conversation-body"]');
+  if (!body) return null;
+
+  const elWrap = body.querySelector('.el-scrollbar__wrap') || body.closest('.el-scrollbar')?.querySelector('.el-scrollbar__wrap');
+  if (elWrap) return elWrap;
+
+  const msgParent = document.querySelector('.z2-message-container')?.parentElement;
+  if (msgParent && msgParent.scrollHeight > msgParent.clientHeight) return msgParent;
+
+  if (body.scrollHeight > body.clientHeight) return body;
+
+  const parent = body.parentElement;
+  if (parent && parent.scrollHeight > parent.clientHeight) return parent;
+
+  return body;
 }
 
 async function scrollUpToLoadMessages() {
@@ -217,17 +274,19 @@ async function scrollUpToLoadMessages() {
 
   await new Promise(r => setTimeout(r, 500));
 
-  let scrollContainer = document.querySelector("#conversation-page-v2 > div.d-flex.flex-grow-1 > div.d-flex.flex-grow-1.flex-column.justify-content-between.border-right > div.z2-conversation-body.scrollbar.pt-5");
-  let fallbackContainer = document.querySelector('.z2-conversation-body');
-  let currentContainer = scrollContainer || fallbackContainer;
-
-  if (!currentContainer) {
-    currentContainer = document.querySelector('.z2-conversation-body, [class*="conversation-body"], .scrollbar');
-  }
+  let currentContainer = findScrollContainer();
 
   if (!currentContainer) {
     if (chrome.runtime) chrome.runtime.sendMessage({ type: 'CONTENT_LOG', text: 'KHONG tim thay scroll container!', logType: 'error' });
     return;
+  }
+
+  if (chrome.runtime) {
+    chrome.runtime.sendMessage({
+      type: 'CONTENT_LOG',
+      text: 'Bat dau scroll load tin nhan...',
+      logType: 'info'
+    });
   }
 
   let lastCount = 0;
@@ -240,16 +299,28 @@ async function scrollUpToLoadMessages() {
     i++;
     const countBefore = getMessageCount();
 
-    currentContainer.scrollTop = 0;
+    currentContainer.scrollTop = -99999;
+    currentContainer.scrollBy(0, -99999);
+    currentContainer.dispatchEvent(new Event('scroll', { bubbles: true }));
+
+    await new Promise(r => setTimeout(r, 800));
 
     let hasProgress = await waitForCondition(
       () => getMessageCount() > countBefore,
-      5000,
-      500,
+      4000,
+      400,
       DYNAMIC_CONFIG.scrollMaxInterval
     );
 
     const countAfter = getMessageCount();
+
+    if (chrome.runtime && i <= 3) {
+      chrome.runtime.sendMessage({
+        type: 'CONTENT_LOG',
+        text: 'Scroll ' + i + ': ' + countAfter + ' tin nhan' + (countAfter > countBefore ? ' (+' + (countAfter - countBefore) + ')' : ''),
+        logType: countAfter > countBefore ? 'success' : 'info'
+      });
+    }
 
     if (countAfter === countBefore || !hasProgress) {
       noChangeCount++;
@@ -262,16 +333,33 @@ async function scrollUpToLoadMessages() {
 
     if (i >= MAX_SCROLL_ATTEMPTS) break;
   }
+
+  if (chrome.runtime) {
+    chrome.runtime.sendMessage({ type: 'CONTENT_LOG', text: 'Scroll xong: ' + lastCount + ' tin nhan', logType: 'info' });
+  }
 }
 
 // ============ MODULE 04: EXTRACT ============
+const UI_ICON_PATTERNS = ['emoji', 'icon', 'three_dots', 'assets/images'];
+
+function isUiIcon(src) {
+  if (!src || typeof src !== 'string') return true;
+  return UI_ICON_PATTERNS.some(p => src.includes(p));
+}
+
+function parseDateFromTimestamp(timestampStr) {
+  if (!timestampStr || typeof timestampStr !== 'string') return null;
+  const parts = timestampStr.trim().split(/\s+/);
+  if (parts.length >= 1 && /^\d{1,2}\/\d{1,2}\/\d{4}$/.test(parts[0])) return parts[0];
+  return null;
+}
+
 function extractMessages() {
   const messages = [];
   const allContainers = document.querySelectorAll('.z2-message-container');
 
   allContainers.forEach((container, index) => {
     try {
-      // Timestamp marker
       const timestampMarker = container.querySelector('div.w-100.text-center span');
       if (timestampMarker) {
         const dateTime = timestampMarker.textContent.trim();
@@ -337,9 +425,7 @@ function extractMessages() {
         const imgs = container.querySelectorAll('.group-img-container img');
         imgs.forEach(img => {
           const src = img.src || img.getAttribute('src');
-          if (src && !src.includes('emoji') && !src.includes('icon') && !src.includes('three_dots')) {
-            imageUrls.push(src);
-          }
+          if (src && !isUiIcon(src)) imageUrls.push(src);
         });
       }
 
@@ -351,7 +437,7 @@ function extractMessages() {
             const imageEl = photoContainer.querySelector(sel);
             if (imageEl) {
               const src = imageEl.src || imageEl.getAttribute('src');
-              if (src && !src.includes('emoji') && !src.includes('icon')) {
+              if (src && !isUiIcon(src)) {
                 imageUrls.push(src);
                 break;
               }
@@ -363,14 +449,14 @@ function extractMessages() {
         const elImage = container.querySelector('.el-image img');
         if (elImage) {
           const src = elImage.src || elImage.getAttribute('src');
-          if (src && !src.includes('emoji') && !src.includes('icon')) imageUrls.push(src);
+          if (src && !isUiIcon(src)) imageUrls.push(src);
         }
       }
       if (imageUrls.length === 0) {
         const allImages = container.querySelectorAll('img');
         for (const img of allImages) {
           const src = img.src || img.getAttribute('src');
-          if (src && !src.includes('emoji') && !src.includes('icon') && !src.includes('three_dots')) {
+          if (src && !isUiIcon(src)) {
             imageUrls.push(src);
             break;
           }
@@ -403,6 +489,17 @@ function extractMessages() {
     }
   });
 
+  // Pass 2: Duyệt ngược - timestamp đánh dấu ngày cho các tin nhắn PHÍA TRƯỚC nó trong DOM
+  let lastTimestampDate = null;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (m.type === 'timestamp') {
+      lastTimestampDate = parseDateFromTimestamp(m.time);
+    } else if (lastTimestampDate && m.time && /^\d{1,2}:\d{2}$/.test(m.time.trim())) {
+      m.time = lastTimestampDate + ' ' + m.time.trim();
+    }
+  }
+
   return messages;
 }
 
@@ -424,6 +521,36 @@ async function waitForConversationsLoaded() {
     if (i < MAX_RETRIES) await new Promise(r => setTimeout(r, POLL_INTERVAL_MS));
   }
   return [];
+}
+
+/**
+ * Lấy tên tư vấn viên từ tooltip của avatar nhỏ (z2-avatar-tooltip)
+ * Trigger hover programmatically để Element UI render tooltip, đọc nội dung rồi ẩn lại
+ * @param {Element} convElement - Conversation item element
+ * @returns {Promise<string|null>} - Tên tư vấn viên hoặc null
+ */
+async function getStaffNameFromAvatarTooltip(convElement) {
+  const avatarEl = convElement.querySelector('.z2-avatar-tooltip[aria-describedby]');
+  if (!avatarEl) return null;
+
+  const tooltipId = avatarEl.getAttribute('aria-describedby');
+  if (!tooltipId) return null;
+
+  avatarEl.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true, view: window }));
+  avatarEl.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, view: window }));
+
+  await new Promise(r => setTimeout(r, 400));
+
+  const tooltipEl = document.getElementById(tooltipId);
+  let staffName = null;
+  if (tooltipEl) {
+    staffName = tooltipEl.textContent?.trim().replace(/\s+/g, ' ') || null;
+  }
+
+  avatarEl.dispatchEvent(new MouseEvent('mouseleave', { bubbles: true, view: window }));
+  avatarEl.dispatchEvent(new MouseEvent('mouseout', { bubbles: true, view: window }));
+
+  return staffName;
 }
 
 function fillAndSearchAndClick(phoneNumber) {
@@ -475,19 +602,19 @@ function fillAndSearchAndClick(phoneNumber) {
         return;
       }
 
-      const allMessages = [];
+      const conversations = [];
 
       for (let convIdx = 0; convIdx < allConvs.length; convIdx++) {
-        await clickConversation(allConvs[convIdx], convIdx, allConvs.length);
+        const conv = allConvs[convIdx];
+        const staffName = (await getStaffNameFromAvatarTooltip(conv)) || 'Conv ' + (convIdx + 1);
+
+        await clickConversation(conv, convIdx, allConvs.length);
         await scrollUpToLoadMessages();
 
         const messages = extractMessages();
 
-        const staffNameEl = allConvs[convIdx].querySelector('[class*="name"], [class*="staff"]');
-        const staffName = staffNameEl?.textContent?.trim() || 'Conversation ' + (convIdx + 1);
-
         const messagesWithStaff = messages.map(msg => ({ ...msg, staffName: staffName }));
-        allMessages.push(...messagesWithStaff);
+        conversations.push({ staffName, messages: messagesWithStaff });
 
         if (convIdx < allConvs.length - 1) {
           await new Promise(r => setTimeout(r, BETWEEN_CONV_MS));
@@ -495,7 +622,7 @@ function fillAndSearchAndClick(phoneNumber) {
       }
 
       window.__extractedPhone = phoneNumber;
-      resolve({ success: true, messages: allMessages, conversationsCount: allConvs.length });
+      resolve({ success: true, conversations, conversationsCount: allConvs.length });
     }
 
     retrySearch();
@@ -545,7 +672,8 @@ window.__crawlerBundle = {
   scrollUpToLoadMessages,
   getMessageCount,
   extractMessages,
-  fillAndSearchAndClick
+  fillAndSearchAndClick,
+  getStaffNameFromAvatarTooltip
 };
 
 console.log('========================================');

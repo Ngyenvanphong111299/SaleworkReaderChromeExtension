@@ -41,7 +41,7 @@ function resetCircuitBreaker() {
 
 function incrementFailure() {
   consecutiveFailures++;
-  console.log('>>> [CIRCUIT] consecutiveFailures:', consecutiveFailures);
+  logToPopup('[CIRCUIT] Lỗi liên tiếp: ' + consecutiveFailures + '/' + MAX_CONSECUTIVE_FAILURES, 'warn');
 }
 
 function isCircuitOpen() {
@@ -70,16 +70,10 @@ function sendMessageWithTimeout(tabId, message, timeoutMs = 30000) {
 }
 
 export async function processPhone(phoneNumber) {
-  console.log('');
-  console.log('==============================================================');
-  console.log('  [PROCESS] XU LY SDT: ' + phoneNumber);
-  console.log('==============================================================');
-
-  logToPopup('=== Bat dau xu ly SDT: ' + phoneNumber + ' ===', 'info');
+  logToPopup('=== Bắt đầu xử lý SDT: ' + phoneNumber + ' ===', 'info');
 
   try {
     const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-    console.log('>>> [PROCESS] So tabs:', tabs.length);
 
     if (!tabs[0]) {
       logToPopup('Khong tim thay tab!', 'error');
@@ -109,7 +103,7 @@ export async function processPhone(phoneNumber) {
         scriptInjected = true;
         break;
       } catch (e) {
-        console.log('>>> [INJECT] Attempt', attempt, 'failed:', e.message);
+        logToPopup('[INJECT] Lần ' + attempt + ' thất bại: ' + e.message, 'warn');
         if (attempt < 3) {
           await new Promise(r => setTimeout(r, 1000));
         }
@@ -135,7 +129,7 @@ export async function processPhone(phoneNumber) {
         TIMING.PROCESS_WAIT
       );
     } catch (e) {
-      console.log('>>> [SEND_MSG] Error:', e.message);
+      logToPopup('[SEND_MSG] Lỗi: ' + e.message, 'error');
       result = { success: false, messages: [], error: e.message };
     }
 
@@ -146,26 +140,21 @@ export async function processPhone(phoneNumber) {
       resetCircuitBreaker(); // Thành công → reset counter
     }
 
-    const messageCount = result?.messages?.length || 0;
-    const conversationsCount = result?.conversationsCount || 0;
+    const conversations = result?.conversations || [];
+    const messageCount = conversations.reduce((s, c) => s + (c.messages?.length || 0), 0);
+    const conversationsCount = conversations.length;
     logToPopup('Trich xuat: ' + messageCount + ' tin nhan (' + conversationsCount + ' cuoc hoi thoai)', messageCount > 0 ? 'info' : 'warn');
 
-    return { messages: result?.messages || [], conversationsCount };
+    return { conversations, conversationsCount };
 
   } catch (e) {
-    console.log('>>> [PROCESS] Loi:', e.message);
-    logToPopup('Loi: ' + e.message, 'error');
+    logToPopup('Lỗi xử lý: ' + e.message, 'error');
     incrementFailure();
     return null;
   }
 }
 
 export async function startCrawl() {
-  console.log('');
-  console.log('==============================================================');
-  console.log('  [START] BAT DAU CRAWL (ROBUST)                         ');
-  console.log('==============================================================');
-
   if (isProcessing) {
     logToPopup('Dang xu ly...', 'warn');
     return { success: false, error: 'Dang xu ly' };
@@ -235,22 +224,23 @@ export async function startCrawl() {
         continue;
       }
 
-      const messages = processResult?.messages || [];
+      const conversations = processResult?.conversations || [];
+      const messageCount = conversations.reduce((s, c) => s + (c.messages?.length || 0), 0);
       const convCount = processResult?.conversationsCount || 0;
 
       // Track time for ETA
       lastOrderProcessTime = Date.now() - startTime;
 
       totalConversations += convCount;
-      totalMessages += messages.length;
+      totalMessages += messageCount;
 
       const orderId = order.id || order.Id;
-      await markOrderAsCrawled(orderId, messages.length);
+      await markOrderAsCrawled(orderId, messageCount);
 
-      if (messages.length > 0) {
-        const saved = await saveMessages(phoneNumber, messages);
+      if (conversations.length > 0) {
+        const saved = await saveMessages(phoneNumber, conversations);
         if (saved) {
-          logToPopup('Da luu ' + messages.length + ' tin nhan', 'success');
+          logToPopup('Da luu ' + messageCount + ' tin nhan', 'success');
         }
       } else {
         logToPopup('Khong co tin nhan de luu', 'warn');
@@ -263,8 +253,7 @@ export async function startCrawl() {
       currentPhoneNumber = null;
 
     } catch (e) {
-      console.log('>>> [CRAWL] Loop error:', e.message);
-      logToPopup('Loi: ' + e.message, 'error');
+      logToPopup('Lỗi vòng lặp: ' + e.message, 'error');
       incrementFailure();
     }
   }

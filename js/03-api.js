@@ -49,7 +49,7 @@ async function fetchWithRetry(url, options = {}, maxRetries = 3, baseDelay = 100
       if (attempt < maxRetries) {
         // Exponential backoff với jitter
         const delay = baseDelay * Math.pow(2, attempt) * (0.5 + Math.random() * 0.5);
-        console.log(`>>> [API] Retry ${attempt + 1}/${maxRetries} after ${Math.round(delay)}ms:`, error.message);
+        logToPopup(`[API] Retry ${attempt + 1}/${maxRetries} sau ${Math.round(delay)}ms: ${error.message}`, 'warn');
         await new Promise(resolve => setTimeout(resolve, delay));
       }
     }
@@ -59,22 +59,16 @@ async function fetchWithRetry(url, options = {}, maxRetries = 3, baseDelay = 100
 }
 
 export async function fetchOneOrder(maxRetries = 5) {
-  console.log('');
-  console.log('==============================================================');
-  console.log('  [API] LAY 1 DON DE XU LY                           ');
-  console.log('==============================================================');
-
   const retryCount = { current: 0 };
 
   async function attemptFetch() {
     retryCount.current++;
 
     const url = API_BASE + '/salework/erp/orders/uncrawled?limit=1';
-    console.log('>>> [API] URL:', url);
+    logToPopup('[API] Lấy 1 đơn chưa crawl...', 'info');
 
     try {
       const response = await fetchWithRetry(url, {}, 3, 800);
-      console.log('>>> [API] Response status:', response.status);
 
       if (!response.ok) {
         throw new Error('API error: ' + response.status);
@@ -82,8 +76,6 @@ export async function fetchOneOrder(maxRetries = 5) {
 
       const data = await response.json();
       const orders = Array.isArray(data) ? data : (data.value || []);
-
-      console.log('>>> [API] Orders count:', orders.length);
 
       if (orders.length === 0) {
         logToPopup('Khong con don nao!', 'warn');
@@ -93,8 +85,6 @@ export async function fetchOneOrder(maxRetries = 5) {
       const order = orders[0];
       const phoneNumber = getPhoneFromOrder(order);
 
-      console.log('>>> [API] PhoneNumber:', phoneNumber, '| Order:', JSON.stringify(order).substring(0, 200));
-
       if (!phoneNumber || phoneNumber.length === 0) {
         logToPopup('Don ' + retryCount.current + ' - SDT rong (bo qua)...', 'warn');
 
@@ -102,7 +92,7 @@ export async function fetchOneOrder(maxRetries = 5) {
         if (skipOrderId) {
           await markOrderAsCrawled(skipOrderId, 0);
         }
-        console.log('>>> [API] Skip don rong, tiep tuc lay don khac...');
+        logToPopup('[API] Bỏ qua đơn không SĐT, lấy đơn khác...', 'warn');
 
         // Recursive retry với maxRetries thay vì loop
         if (retryCount.current < maxRetries) {
@@ -115,8 +105,6 @@ export async function fetchOneOrder(maxRetries = 5) {
       return { order, phoneNumber };
 
     } catch (e) {
-      console.log('>>> [API] Loi:', e.message);
-
       if (retryCount.current < maxRetries) {
         logToPopup('Loi API: ' + e.message + ', thu lai...', 'error');
         const delay = 1000 * Math.pow(2, retryCount.current - 1);
@@ -132,21 +120,54 @@ export async function fetchOneOrder(maxRetries = 5) {
   return attemptFetch();
 }
 
-export async function saveMessages(phoneNumber, messages) {
-  console.log('>>> [API] Luu tin nhan cho SDT:', phoneNumber);
-  console.log('>>> [API] So tin nhan:', messages?.length || 0);
-
-  if (messages && messages.length > 0) {
-    console.log('>>> [API] First message sample:', JSON.stringify(messages[0]).substring(0, 200));
-  }
+/**
+ * Preview payload - không lưu DB, dùng cho Manual Search test
+ */
+export async function previewMessages(phoneNumber, conversations) {
+  const totalMsg = conversations?.reduce((s, c) => s + (c.messages?.length || 0), 0) || 0;
+  logToPopup('[API] Preview SDT: ' + phoneNumber + ', ' + (conversations?.length || 0) + ' hội thoại, ' + totalMsg + ' tin nhắn', 'info');
 
   try {
     const requestBody = {
       phoneNumber: phoneNumber,
-      messages: messages,
+      conversations: conversations,
       replaceExisting: true
     };
-    console.log('>>> [API] Request body:', JSON.stringify(requestBody).substring(0, 500));
+
+    const response = await fetchWithRetry(
+      API_BASE + '/salework/messages/preview',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody)
+      },
+      2,
+      800
+    );
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error('API error: ' + response.status + ' - ' + errorText);
+    }
+
+    const data = await response.json();
+    return data;
+  } catch (e) {
+    logToPopup('Preview lỗi: ' + e.message, 'error');
+    throw e;
+  }
+}
+
+export async function saveMessages(phoneNumber, conversations) {
+  const totalMsg = conversations?.reduce((s, c) => s + (c.messages?.length || 0), 0) || 0;
+  logToPopup('[API] Lưu tin nhắn cho SDT: ' + phoneNumber + ', ' + (conversations?.length || 0) + ' hội thoại, ' + totalMsg + ' tin nhắn', 'info');
+
+  try {
+    const requestBody = {
+      phoneNumber: phoneNumber,
+      conversations: conversations,
+      replaceExisting: true
+    };
 
     const response = await fetchWithRetry(
       API_BASE + '/salework/messages',
@@ -159,27 +180,21 @@ export async function saveMessages(phoneNumber, messages) {
       1000
     );
 
-    console.log('>>> [API] Response status:', response.status);
-
     if (!response.ok) {
       const errorText = await response.text();
-      console.log('>>> [API] Error response:', errorText);
       throw new Error('API error: ' + response.status + ' - ' + errorText);
     }
 
     await response.json();
-    logToPopup('Da luu ' + messages.length + ' tin nhan', 'info');
+    logToPopup('Đã lưu ' + totalMsg + ' tin nhắn', 'info');
     return true;
   } catch (e) {
-    console.log('>>> [API] Exception:', e.message);
-    logToPopup('Loi luu: ' + e.message, 'error');
+    logToPopup('Lỗi lưu: ' + e.message, 'error');
     return false;
   }
 }
 
 export async function markOrderAsCrawled(orderId, messageCount) {
-  console.log('>>> [API] Danh dau da crawl cho orderId:', orderId);
-
   try {
     const response = await fetchWithRetry(
       API_BASE + '/salework/orders/crawled',
@@ -196,10 +211,9 @@ export async function markOrderAsCrawled(orderId, messageCount) {
       throw new Error('API error: ' + response.status);
     }
 
-    console.log('>>> [API] Da danh dau crawl thanh cong');
     return true;
   } catch (e) {
-    console.log('>>> [API] Loi danh dau:', e.message);
+    logToPopup('[API] Lỗi đánh dấu đã crawl: ' + e.message, 'error');
     return false;
   }
 }

@@ -1,8 +1,10 @@
 // Step 02: Tìm và click vào conversation với dynamic waiting
 
-var CONV_LOAD_MS = 3000;
+function logToUI(text, logType) {
+  try { chrome.runtime.sendMessage({ type: 'CONTENT_LOG', text: String(text), logType: logType || 'info' }); } catch (_) {}
+}
 
-console.log('>>> [CONTENT] 02-conversation.js loaded');
+var CONV_LOAD_MS = 3000;
 
 // DOM Cache
 const domCache = {

@@ -4,13 +4,7 @@ import { logToPopup } from './02-utils.js';
 import { getCrawlState, stopCrawl, startCrawl, skipCurrentOrder } from './04-crawl.js';
 import { API_BASE, ENV_CONFIG } from './01-config.js';
 
-console.log('');
-console.log('==============================================================');
-console.log('         BACKGROUND SCRIPT: DA TAI v2.1                 ');
-console.log('==============================================================');
-console.log('');
-console.log('>>> [CONFIG] API_BASE:', API_BASE);
-console.log('>>> [CONFIG] ENV:', ENV_CONFIG.mode);
+logToPopup('Background script v2.1 đã tải. ENV: ' + ENV_CONFIG.mode, 'info');
 
 // Rate Limiting
 const RATE_LIMIT = {
@@ -65,23 +59,19 @@ chrome.action.onClicked.addListener(async (tab) => {
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  console.log('>>> [MSG] Nhan message:', message.type);
-
   if (message.type === 'START_CRAWL') {
-    console.log('>>> [MSG] Bat dau crawl');
+    logToPopup('[MSG] Bắt đầu crawl', 'info');
     startCrawl().then((result) => {
       sendResponse(result);
     });
     return true;
 
   } else if (message.type === 'STOP_CRAWL') {
-    console.log('>>> [MSG] Dung crawl');
     stopCrawl();
     logToPopup('Da dung crawl', 'warn');
     sendResponse({ success: true });
 
   } else if (message.type === 'SKIP_CURRENT_ORDER') {
-    console.log('>>> [MSG] Skip current order');
     skipCurrentOrder();
     logToPopup('Da skip order hien tai', 'warn');
     sendResponse({ success: true });
@@ -100,7 +90,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     logToPopup('Content: ' + message.text, message.logType || 'info');
 
   } else if (message.type === 'MESSAGES_EXTRACTED') {
-    console.log('>>> [MSG] Tin nhan tu content:', message.messages?.length || 0);
     if (message.error) {
       logToPopup('Loi content: ' + message.error, 'error');
     } else {
@@ -109,8 +98,4 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 });
 
-console.log('');
-console.log('==============================================================');
-console.log('         BACKGROUND SCRIPT: SAN SANG                     ');
-console.log('==============================================================');
-console.log('');
+logToPopup('Background script sẵn sàng', 'info');

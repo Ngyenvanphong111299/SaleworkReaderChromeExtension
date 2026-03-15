@@ -30,6 +30,36 @@ async function waitForConversationsLoaded() {
   return [];
 }
 
+/**
+ * Lấy tên tư vấn viên từ tooltip của avatar nhỏ (z2-avatar-tooltip)
+ * Trigger hover programmatically để Element UI render tooltip, đọc nội dung rồi ẩn lại
+ * @param {Element} convElement - Conversation item element
+ * @returns {Promise<string|null>} - Tên tư vấn viên hoặc null
+ */
+async function getStaffNameFromAvatarTooltip(convElement) {
+  const avatarEl = convElement.querySelector('.z2-avatar-tooltip[aria-describedby]');
+  if (!avatarEl) return null;
+
+  const tooltipId = avatarEl.getAttribute('aria-describedby');
+  if (!tooltipId) return null;
+
+  avatarEl.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true, view: window }));
+  avatarEl.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, view: window }));
+
+  await new Promise(r => setTimeout(r, 400));
+
+  const tooltipEl = document.getElementById(tooltipId);
+  let staffName = null;
+  if (tooltipEl) {
+    staffName = tooltipEl.textContent?.trim().replace(/\s+/g, ' ') || null;
+  }
+
+  avatarEl.dispatchEvent(new MouseEvent('mouseleave', { bubbles: true, view: window }));
+  avatarEl.dispatchEvent(new MouseEvent('mouseout', { bubbles: true, view: window }));
+
+  return staffName;
+}
+
 /** Trả về Promise<{ success, messages, error }> - đợi đến khi xong hoặc thất bại */
 function fillAndSearchAndClick(phoneNumber) {
   console.log('');
@@ -81,10 +111,12 @@ function fillAndSearchAndClick(phoneNumber) {
 
       console.log('>>> TÌM THẤY ' + allConvs.length + ' CONVERSATIONS');
 
-      const allMessages = [];
+      const conversations = [];
       let conversationIndex = 0;
 
       for (const conv of allConvs) {
+        const staffName = (await getStaffNameFromAvatarTooltip(conv)) || 'Conv ' + (conversationIndex + 1);
+
         await clickConversation(conv, conversationIndex, allConvs.length);
 
         chrome.runtime.sendMessage({ type: 'CONTENT_LOG', text: '[Conv ' + (conversationIndex + 1) + '/' + allConvs.length + '] Scroll load tin nhan...', logType: 'info' });
@@ -94,11 +126,8 @@ function fillAndSearchAndClick(phoneNumber) {
         const messages = extractMessages();
         chrome.runtime.sendMessage({ type: 'CONTENT_LOG', text: '[Conv ' + (conversationIndex + 1) + '] Trich xuat duoc ' + messages.length + ' tin nhan', logType: messages.length > 0 ? 'success' : 'warn' });
 
-        const staffNameEl = conv.querySelector('[class*="name"], [class*="staff"]');
-        const staffName = staffNameEl?.textContent?.trim() || 'Conversation ' + (conversationIndex + 1);
-
         const messagesWithStaff = messages.map(msg => ({ ...msg, staffName: staffName }));
-        allMessages.push(...messagesWithStaff);
+        conversations.push({ staffName, messages: messagesWithStaff });
 
         conversationIndex++;
         if (conversationIndex < allConvs.length) {
@@ -106,12 +135,13 @@ function fillAndSearchAndClick(phoneNumber) {
         }
       }
 
+      const totalMessages = conversations.reduce((sum, c) => sum + c.messages.length, 0);
       window.__extractedPhone = phoneNumber;
-      const doneMsg = 'Hoan thanh crawl ' + allConvs.length + ' conversation, tong ' + allMessages.length + ' tin nhan';
+      const doneMsg = 'Hoan thanh crawl ' + allConvs.length + ' conversation, tong ' + totalMessages + ' tin nhan';
       console.log('>>> ' + doneMsg);
       chrome.runtime.sendMessage({ type: 'CONTENT_LOG', text: doneMsg, logType: 'success' });
 
-      resolve({ success: true, messages: allMessages, conversationsCount: allConvs.length });
+      resolve({ success: true, conversations, conversationsCount: allConvs.length });
     }
 
     retrySearch();

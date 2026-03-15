@@ -593,6 +593,78 @@
       margin-top: 12px;
     }
 
+    /* ===== API Data Preview ===== */
+    .api-data-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: 12px;
+      overflow: hidden;
+      margin-bottom: 16px;
+      display: none;
+    }
+
+    .api-data-card.show {
+      display: block;
+    }
+
+    .api-data-header {
+      padding: 10px 16px;
+      background: rgba(139, 92, 246, 0.15);
+      border-bottom: 1px solid var(--border-color);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .api-data-header-right {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .api-data-header span:first-child {
+      font-size: 12px;
+      font-weight: 600;
+      color: #a78bfa;
+    }
+
+    .api-data-summary {
+      font-size: 11px;
+      color: var(--text-secondary);
+    }
+
+    .api-data-copy-btn {
+      padding: 4px 8px;
+      font-size: 10px;
+      background: rgba(139, 92, 246, 0.3);
+      border: 1px solid rgba(139, 92, 246, 0.5);
+      border-radius: 6px;
+      color: #a78bfa;
+      cursor: pointer;
+    }
+
+    .api-data-copy-btn:hover {
+      background: rgba(139, 92, 246, 0.5);
+    }
+
+    .api-data-body {
+      max-height: 280px;
+      overflow: auto;
+      padding: 12px;
+      font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
+      font-size: 11px;
+      line-height: 1.5;
+      color: #cbd5e1;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+
+    .api-data-body .json-key { color: #7dd3fc; }
+    .api-data-body .json-string { color: #86efac; }
+    .api-data-body .json-number { color: #fcd34d; }
+    .api-data-body .json-boolean { color: #f472b6; }
+
     /* ===== Utility ===== */
     .hidden { display: none !important; }
   </style>
@@ -715,6 +787,20 @@
           Search
         </button>
       </div>
+    </div>
+  </div>
+
+  <!-- API Data Preview (Manual Search) -->
+  <div id="apiDataCard" class="api-data-card">
+    <div class="api-data-header">
+      <span>📤 Data gửi lên API</span>
+      <div class="api-data-header-right">
+        <span class="api-data-summary" id="apiDataSummary">--</span>
+        <button type="button" id="apiDataCopyBtn" class="api-data-copy-btn" title="Copy JSON">Copy</button>
+      </div>
+    </div>
+    <div class="api-data-body" id="apiDataBody">
+      <em style="color: var(--text-muted);">Chạy Test SDT để xem data</em>
     </div>
   </div>
 

@@ -1,5 +1,19 @@
 // Step 04: Trích xuất tin nhắn từ DOM
 
+const UI_ICON_PATTERNS = ['emoji', 'icon', 'three_dots', 'assets/images'];
+
+function isUiIcon(src) {
+  if (!src || typeof src !== 'string') return true;
+  return UI_ICON_PATTERNS.some(p => src.includes(p));
+}
+
+function parseDateFromTimestamp(timestampStr) {
+  if (!timestampStr || typeof timestampStr !== 'string') return null;
+  const parts = timestampStr.trim().split(/\s+/);
+  if (parts.length >= 1 && /^\d{1,2}\/\d{1,2}\/\d{4}$/.test(parts[0])) return parts[0];
+  return null;
+}
+
 function extractMessages() {
   console.log('');
   console.log('>>> [EXTRACT] Bắt đầu trích xuất tin nhắn...');
@@ -74,7 +88,7 @@ function extractMessages() {
         const imgs = container.querySelectorAll('.group-img-container img');
         imgs.forEach(function (img) {
           const src = img.src || img.getAttribute('src');
-          if (src && !src.includes('emoji') && !src.includes('icon') && !src.includes('three_dots')) {
+          if (src && !isUiIcon(src)) {
             imageUrls.push(src);
           }
         });
@@ -88,7 +102,7 @@ function extractMessages() {
             const imageEl = photoContainer.querySelector(sel);
             if (imageEl) {
               const src = imageEl.src || imageEl.getAttribute('src');
-              if (src && !src.includes('emoji') && !src.includes('icon')) {
+              if (src && !isUiIcon(src)) {
                 imageUrls.push(src);
                 break;
               }
@@ -100,14 +114,14 @@ function extractMessages() {
         const elImage = container.querySelector('.el-image img');
         if (elImage) {
           const src = elImage.src || elImage.getAttribute('src');
-          if (src && !src.includes('emoji') && !src.includes('icon')) imageUrls.push(src);
+          if (src && !isUiIcon(src)) imageUrls.push(src);
         }
       }
       if (imageUrls.length === 0) {
         const allImages = container.querySelectorAll('img');
         for (const img of allImages) {
           const src = img.src || img.getAttribute('src');
-          if (src && !src.includes('emoji') && !src.includes('icon') && !src.includes('three_dots')) {
+          if (src && !isUiIcon(src)) {
             imageUrls.push(src);
             break;
           }
@@ -140,6 +154,17 @@ function extractMessages() {
       console.log('>>> [EXTRACT] ✗ Lỗi trích xuất tin nhắn #' + index + ':', e.message);
     }
   });
+
+  // Pass 2: Duyệt ngược - timestamp đánh dấu ngày cho các tin nhắn PHÍA TRƯỚC nó trong DOM
+  let lastTimestampDate = null;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (m.type === 'timestamp') {
+      lastTimestampDate = parseDateFromTimestamp(m.time);
+    } else if (lastTimestampDate && m.time && /^\d{1,2}:\d{2}$/.test(m.time.trim())) {
+      m.time = lastTimestampDate + ' ' + m.time.trim();
+    }
+  }
 
   console.log('>>> [EXTRACT] ✓ HOÀN THÀNH! Tổng số: ' + messages.length);
   return messages;
