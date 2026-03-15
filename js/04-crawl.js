@@ -7,12 +7,8 @@ import { fetchOneOrder, saveMessages, markOrderAsCrawled } from './03-api.js';
 let currentPhoneNumber = null;
 let isProcessing = false;
 
-// Circuit Breaker state
-let consecutiveFailures = 0;
-const MAX_CONSECUTIVE_FAILURES = 5; // Dừng sau 5 lần thất bại liên tiếp
-
 export function getCrawlState() {
-  return { isProcessing, currentPhoneNumber, consecutiveFailures };
+  return { isProcessing, currentPhoneNumber };
 }
 
 export function setCrawlState(processing, phone = null) {
@@ -22,7 +18,6 @@ export function setCrawlState(processing, phone = null) {
 
 export function stopCrawl() {
   isProcessing = false;
-  consecutiveFailures = 0; // Reset circuit breaker
 }
 
 let shouldSkipCurrentOrder = false;
@@ -33,19 +28,6 @@ export function skipCurrentOrder() {
 
 function resetSkipFlag() {
   shouldSkipCurrentOrder = false;
-}
-
-function resetCircuitBreaker() {
-  consecutiveFailures = 0;
-}
-
-function incrementFailure() {
-  consecutiveFailures++;
-  logToPopup('[CIRCUIT] Lỗi liên tiếp: ' + consecutiveFailures + '/' + MAX_CONSECUTIVE_FAILURES, 'warn');
-}
-
-function isCircuitOpen() {
-  return consecutiveFailures >= MAX_CONSECUTIVE_FAILURES;
 }
 
 /**
@@ -112,7 +94,6 @@ export async function processPhone(phoneNumber) {
 
     if (!scriptInjected) {
       logToPopup('Loi inject script!', 'error');
-      incrementFailure();
       return null;
     }
 
@@ -135,9 +116,6 @@ export async function processPhone(phoneNumber) {
 
     if (result.error) {
       logToPopup('Loi: ' + result.error, 'error');
-      incrementFailure();
-    } else {
-      resetCircuitBreaker(); // Thành công → reset counter
     }
 
     const conversations = result?.conversations || [];
@@ -149,7 +127,6 @@ export async function processPhone(phoneNumber) {
 
   } catch (e) {
     logToPopup('Lỗi xử lý: ' + e.message, 'error');
-    incrementFailure();
     return null;
   }
 }
@@ -160,14 +137,7 @@ export async function startCrawl(orderLimit = 99999) {
     return { success: false, error: 'Dang xu ly' };
   }
 
-  // Kiểm tra circuit breaker
-  if (isCircuitOpen()) {
-    logToPopup('Circuit breaker OPEN! Da qua ' + MAX_CONSECUTIVE_FAILURES + ' loi lien tiep. Vui long thu lai sau!', 'error');
-    return { success: false, error: 'Circuit breaker open' };
-  }
-
   isProcessing = true;
-  resetCircuitBreaker();
 
   let totalCrawled = 0;
   let totalConversations = 0;
@@ -177,17 +147,6 @@ export async function startCrawl(orderLimit = 99999) {
   while (isProcessing) {
     // Reset skip flag at start of each iteration
     resetSkipFlag();
-
-    // Kiểm tra circuit breaker trong mỗi vòng lặp
-    if (isCircuitOpen()) {
-      logToPopup('Circuit breaker triggered! Dung lai sau ' + MAX_CONSECUTIVE_FAILURES + ' loi.', 'error');
-      chrome.runtime.sendMessage({
-        type: 'STATUS_UPDATE',
-        status: 'circuit_breaker',
-        error: 'Too many consecutive failures'
-      });
-      break;
-    }
 
     logToPopup('=== Lay don tiep theo... ===', 'info');
 
@@ -259,7 +218,6 @@ export async function startCrawl(orderLimit = 99999) {
 
     } catch (e) {
       logToPopup('Lỗi vòng lặp: ' + e.message, 'error');
-      incrementFailure();
     }
   }
 

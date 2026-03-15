@@ -241,12 +241,6 @@ document.addEventListener('DOMContentLoaded', () => {
         const err = response?.error || 'Lỗi không xác định';
         showStatus(err, 'error');
         addLog('✗ Lỗi: ' + err, 'error');
-
-        // Show error recovery for circuit breaker
-        if (err.includes('Circuit breaker')) {
-          showError('Circuit Breaker Open', 'Quá nhiều lỗi liên tiếp. Vui lòng kiểm tra kết nối và thử lại sau.', false, false);
-        }
-
         resetStartButton();
       }
     } catch (e) {
@@ -454,12 +448,6 @@ document.addEventListener('DOMContentLoaded', () => {
         // Show error recovery
         showError('Lỗi', message.error, true, true);
         resetStartButton();
-      }
-
-      if (message.status === 'circuit_breaker') {
-        showError('Circuit Breaker Open', 'Quá 5 lần lỗi liên tiếp. Hệ thống tạm dừng để bảo vệ.', false, false);
-        resetStartButton();
-        toggleProgress(false);
       }
     }
   });
