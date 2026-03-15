@@ -1,6 +1,119 @@
 // Step 01: Cấu hình extension - hằng số dùng chung
 
-export const API_BASE = 'http://localhost:5153/api/v1';
+// ============ ENVIRONMENT CONFIG ============
+export const ENV_CONFIG = {
+  // Chế độ: 'development' hoặc 'production'
+  mode: 'development',
+
+  // Development settings
+  development: {
+    apiBase: 'http://localhost:5153/api/v1',
+    logLevel: 'debug'
+  },
+
+  // Production settings
+  production: {
+    // TODO: Thay bằng production API URL khi deploy
+    apiBase: 'https://api.yourdomain.com/api/v1',
+    logLevel: 'info'
+  },
+
+  getApiBase() {
+    return this[this.mode].apiBase;
+  },
+
+  getLogLevel() {
+    return this[this.mode].logLevel;
+  }
+};
+
+// Legacy support - sử dụng getApiBase()
+export const API_BASE = ENV_CONFIG.getApiBase();
+
+// ============ VALIDATION UTILITIES ============
+
+/**
+ * Validate phone number (Việt Nam)
+ * @param {string} phone - Số điện thoại cần validate
+ * @returns {boolean} - True nếu hợp lệ
+ */
+export function isValidPhoneNumber(phone) {
+  if (!phone || typeof phone !== 'string') return false;
+
+  // Remove all non-digit characters
+  const digits = phone.replace(/\D/g, '');
+
+  // Vietnamese phone number patterns
+  const patterns = [
+    /^0[3-9]\d{8}$/,    // 10 digits: 03x, 04x, 05x, 07x, 08x, 09x
+    /^84[3-9]\d{8}$/,   // International: 843, 844, etc.
+    /^\+84[3-9]\d{8}$/  // With +84
+  ];
+
+  return patterns.some(pattern => pattern.test(digits));
+}
+
+/**
+ * Sanitize phone number - chuẩn hóa về format Việt Nam
+ * @param {string} phone - Số điện thoại
+ * @returns {string|null} - Số đã sanitize hoặc null nếu invalid
+ */
+export function sanitizePhoneNumber(phone) {
+  if (!phone || typeof phone !== 'string') return null;
+
+  // Remove all non-digit characters
+  let digits = phone.replace(/\D/g, '');
+
+  // Handle +84
+  if (digits.startsWith('84')) {
+    digits = '0' + digits.substring(2);
+  }
+
+  // Validate
+  if (!isValidPhoneNumber(digits)) {
+    return null;
+  }
+
+  return digits;
+}
+
+/**
+ * Validate API response
+ * @param {any} data - Data cần validate
+ * @param {string[]} requiredFields - Các fields bắt buộc
+ * @returns {{valid: boolean, errors: string[]}}
+ */
+export function validateApiResponse(data, requiredFields = []) {
+  const errors = [];
+
+  if (!data || typeof data !== 'object') {
+    return { valid: false, errors: ['Invalid response format'] };
+  }
+
+  for (const field of requiredFields) {
+    if (!(field in data)) {
+      errors.push(`Missing required field: ${field}`);
+    }
+  }
+
+  return {
+    valid: errors.length === 0,
+    errors
+  };
+}
+
+/**
+ * Escape HTML để tránh XSS
+ * @param {string} text - Text cần escape
+ * @returns {string}
+ */
+export function escapeHtml(text) {
+  if (!text || typeof text !== 'string') return '';
+
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
 
 /** Thời gian chờ (ms) - baseline values cho dynamic waiting */
 export const TIMING = {

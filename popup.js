@@ -1,6 +1,9 @@
-// Sidebar popup script
+// Sidebar popup script (Optimized)
 
 console.log('=== Popup: Đã tải ===');
+
+// ============ CONFIG ============
+const MAX_LOG_ITEMS = 100; // Giới hạn log để tránh memory leak
 
 document.addEventListener('DOMContentLoaded', () => {
   console.log('>>> Popup DOMContentLoaded');
@@ -16,6 +19,19 @@ document.addEventListener('DOMContentLoaded', () => {
 
   let isProcessing = false;
 
+  /**
+   * Validate phone number (Vietnamese format)
+   */
+  function isValidPhoneNumber(phone) {
+    if (!phone || typeof phone !== 'string') return false;
+    const digits = phone.replace(/\D/g, '');
+    const patterns = [/^0[3-9]\d{8}$/, /^84[3-9]\d{8}$/, /^\+84[3-9]\d{8}$/];
+    return patterns.some(pattern => pattern.test(digits));
+  }
+
+  /**
+   * Add log với memory leak protection
+   */
   function addLog(message, type = 'info') {
     console.log('[LOG] ' + message);
     const now = new Date();
@@ -24,6 +40,12 @@ document.addEventListener('DOMContentLoaded', () => {
     logItem.className = 'log-item ' + type;
     logItem.innerHTML = '<span class="log-time">[' + time + ']</span>' + escapeHtml(message);
     logList.appendChild(logItem);
+
+    // FIX: Giới hạn số lượng log để tránh memory leak
+    while (logList.children.length > MAX_LOG_ITEMS) {
+      logList.removeChild(logList.firstChild);
+    }
+
     logList.scrollTop = logList.scrollHeight;
   }
 
@@ -153,9 +175,23 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   manualSearchBtn?.addEventListener('click', async () => {
-    const phone = manualPhoneInput?.value?.trim();
+    let phone = manualPhoneInput?.value?.trim();
+
+    // VALIDATION: Kiểm tra phone number
     if (!phone) {
       addLog('Vui lòng nhập số điện thoại!', 'warn');
+      return;
+    }
+
+    // Sanitize phone number
+    phone = phone.replace(/\D/g, '');
+    if (phone.startsWith('84')) {
+      phone = '0' + phone.substring(2);
+    }
+
+    // Validate
+    if (!isValidPhoneNumber(phone)) {
+      addLog('Số điện thoại không hợp lệ! Vui lòng nhập số Việt Nam (10 chữ số)', 'error');
       return;
     }
 
@@ -178,29 +214,36 @@ document.addEventListener('DOMContentLoaded', () => {
         await new Promise(r => setTimeout(r, 3000));
       }
 
-      // Inject content script
+      // Inject content script (OPTIMIZED: Sử dụng bundle)
       addLog('Đang inject script...', 'info');
       await chrome.scripting.executeScript({
         target: { tabId: tabId },
-        files: [
-          'content/01-search.js',
-          'content/02-conversation.js',
-          'content/03-scroll.js',
-          'content/04-extract.js',
-          'content/05-main.js'
-        ]
+        files: ['content/bundle.js'] // Thay vì 5 files riêng biệt
       });
 
       await new Promise(r => setTimeout(r, 1000));
 
-      // Send FILL_AND_SEARCH message
+      // Send FILL_AND_SEARCH message với timeout
       addLog('Đang search SDT: ' + phone, 'info');
-      await chrome.tabs.sendMessage(tabId, {
-        type: 'FILL_AND_SEARCH',
-        phoneNumber: phone
-      });
 
-      addLog('Đã gửi yêu cầu search!', 'info');
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000);
+
+      try {
+        await chrome.tabs.sendMessage(tabId, {
+          type: 'FILL_AND_SEARCH',
+          phoneNumber: phone
+        });
+        clearTimeout(timeoutId);
+        addLog('Đã gửi yêu cầu search!', 'success');
+      } catch (e) {
+        clearTimeout(timeoutId);
+        if (e.message?.includes('timeout') || e.message?.includes('abort')) {
+          addLog('Timeout! Không nhận được phản hồi từ content script', 'error');
+        } else {
+          throw e;
+        }
+      }
 
     } catch (e) {
       addLog('Lỗi: ' + e.message, 'error');
