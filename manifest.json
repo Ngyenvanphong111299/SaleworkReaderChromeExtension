@@ -13,7 +13,7 @@
   ],
   "host_permissions": [
     "*://*.salework.net/*",
-    "https://omnichannel.hoangkimeco.com/*"
+    "http://localhost:5153/*"
   ],
   "background": {
     "service_worker": "js/05-background.js",

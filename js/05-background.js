@@ -2,15 +2,9 @@
 
 import { logToPopup } from './02-utils.js';
 import { getCrawlState, stopCrawl, startCrawl, skipCurrentOrder } from './04-crawl.js';
-import { getConfig, refreshConfig, getApiBase, ENV_CONFIG } from './01-config.js';
-import { initSettings } from './00-settings.js';
+import { API_BASE, ENV_CONFIG } from './01-config.js';
 
-// Init settings trước khi sử dụng
-initSettings().then((settings) => {
-  logToPopup('Background script v2.1 đã tải. API: ' + settings.apiBaseUrl, 'info');
-});
-
-logToPopup('Background script v2.1 đang khởi tạo...', 'info');
+logToPopup('Background script v2.1 đã tải. ENV: ' + ENV_CONFIG.mode, 'info');
 
 // Rate Limiting
 const RATE_LIMIT = {

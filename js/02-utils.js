@@ -40,13 +40,9 @@ function flushMessages() {
   const batch = [...messageQueue];
   messageQueue.length = 0;
 
-  // Gửi từng message, bỏ qua lỗi nếu popup đóng
+  // Gửi từng message
   batch.forEach(msg => {
-    try {
-      chrome.runtime.sendMessage(msg);
-    } catch (e) {
-      // Popup đóng hoặc không có listener - bỏ qua lỗi
-    }
+    chrome.runtime.sendMessage(msg);
   });
 }
 

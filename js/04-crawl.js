@@ -4,17 +4,6 @@ import { TIMING, ENV_CONFIG } from './01-config.js';
 import { logToPopup } from './02-utils.js';
 import { fetchOneOrder, saveMessages, markOrderAsCrawled } from './03-api.js';
 
-/**
- * Gửi message an toàn - bỏ qua lỗi nếu popup đóng
- */
-function sendMessageSafe(message) {
-  try {
-    chrome.runtime.sendMessage(message);
-  } catch (e) {
-    // Popup đóng - bỏ qua lỗi
-  }
-}
-
 let currentPhoneNumber = null;
 let isProcessing = false;
 
@@ -192,7 +181,7 @@ export async function startCrawl(orderLimit = 99999) {
     // Kiểm tra circuit breaker trong mỗi vòng lặp
     if (isCircuitOpen()) {
       logToPopup('Circuit breaker triggered! Dung lai sau ' + MAX_CONSECUTIVE_FAILURES + ' loi.', 'error');
-      sendMessageSafe({
+      chrome.runtime.sendMessage({
         type: 'STATUS_UPDATE',
         status: 'circuit_breaker',
         error: 'Too many consecutive failures'
@@ -220,7 +209,7 @@ export async function startCrawl(orderLimit = 99999) {
         break;
       }
 
-      sendMessageSafe({
+      chrome.runtime.sendMessage({
         type: 'STATUS_UPDATE',
         status: 'processing',
         current: totalCrawled,
@@ -276,7 +265,7 @@ export async function startCrawl(orderLimit = 99999) {
 
   isProcessing = false;
 
-  sendMessageSafe({
+  chrome.runtime.sendMessage({
     type: 'STATUS_UPDATE',
     status: 'done',
     totalOrders: totalCrawled,
