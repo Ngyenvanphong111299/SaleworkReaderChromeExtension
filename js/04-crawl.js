@@ -25,6 +25,16 @@ export function stopCrawl() {
   consecutiveFailures = 0; // Reset circuit breaker
 }
 
+let shouldSkipCurrentOrder = false;
+
+export function skipCurrentOrder() {
+  shouldSkipCurrentOrder = true;
+}
+
+function resetSkipFlag() {
+  shouldSkipCurrentOrder = false;
+}
+
 function resetCircuitBreaker() {
   consecutiveFailures = 0;
 }
@@ -173,17 +183,27 @@ export async function startCrawl() {
   let totalCrawled = 0;
   let totalConversations = 0;
   let totalMessages = 0;
+  let lastOrderProcessTime = 0;
 
   while (isProcessing) {
+    // Reset skip flag at start of each iteration
+    resetSkipFlag();
+
     // Kiểm tra circuit breaker trong mỗi vòng lặp
     if (isCircuitOpen()) {
       logToPopup('Circuit breaker triggered! Dung lai sau ' + MAX_CONSECUTIVE_FAILURES + ' loi.', 'error');
+      chrome.runtime.sendMessage({
+        type: 'STATUS_UPDATE',
+        status: 'circuit_breaker',
+        error: 'Too many consecutive failures'
+      });
       break;
     }
 
     logToPopup('=== Lay don tiep theo... ===', 'info');
 
     try {
+      const startTime = Date.now();
       const result = await fetchOneOrder();
 
       if (!result || !result.phoneNumber) {
@@ -200,14 +220,26 @@ export async function startCrawl() {
         status: 'processing',
         current: totalCrawled,
         total: totalCrawled,
-        phone: phoneNumber
+        phone: phoneNumber,
+        lastOrderTime: lastOrderProcessTime
       });
 
       logToPopup('Xu ly SDT: ' + phoneNumber + ' (don ' + totalCrawled + ')', 'info');
 
       const processResult = await processPhone(phoneNumber);
+
+      // Check if we should skip this order
+      if (shouldSkipCurrentOrder) {
+        logToPopup('Skip order: ' + phoneNumber, 'warn');
+        resetSkipFlag();
+        continue;
+      }
+
       const messages = processResult?.messages || [];
       const convCount = processResult?.conversationsCount || 0;
+
+      // Track time for ETA
+      lastOrderProcessTime = Date.now() - startTime;
 
       totalConversations += convCount;
       totalMessages += messages.length;

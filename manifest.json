@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Salework Crawler",
   "version": "2.1",
-  "description": "Tự động tìm kiếm và trích xuất tin nhắn từ Salework (Optimized)",
+  "description": "Tự động tìm kiếm và trích xuất tin nhắn từ Salework (v2.1 - Enhanced)",
   "permissions": [
     "activeTab",
     "storage",

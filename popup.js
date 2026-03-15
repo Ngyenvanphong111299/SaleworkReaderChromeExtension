@@ -1,13 +1,15 @@
-// Sidebar popup script (Optimized)
+// Sidebar popup script (v2.1 - Enhanced with Progress & Error Recovery)
 
-console.log('=== Popup: Đã tải ===');
+console.log('=== Popup v2.1: Đã tải ===');
 
 // ============ CONFIG ============
-const MAX_LOG_ITEMS = 100; // Giới hạn log để tránh memory leak
+const MAX_LOG_ITEMS = 100;
+const PROGRESS_ESTIMATE_SAMPLES = 5; // Số mẫu để tính ETA
 
 document.addEventListener('DOMContentLoaded', () => {
   console.log('>>> Popup DOMContentLoaded');
 
+  // UI Elements
   const startBtn = document.getElementById('startBtn');
   const stopBtn = document.getElementById('stopBtn');
   const status = document.getElementById('status');
@@ -17,7 +19,82 @@ document.addEventListener('DOMContentLoaded', () => {
   const totalConversationsEl = document.getElementById('totalConversations');
   const totalMessagesEl = document.getElementById('totalMessages');
 
+  // Progress Elements
+  const progressContainer = document.getElementById('progressContainer');
+  const progressFill = document.getElementById('progressFill');
+  const progressPercent = document.getElementById('progressPercent');
+  const progressEta = document.getElementById('progressEta');
+
+  // Error Recovery Elements
+  const errorRecovery = document.getElementById('errorRecovery');
+  const errorTitle = document.getElementById('errorTitle');
+  const errorMessage = document.getElementById('errorMessage');
+  const retryBtn = document.getElementById('retryBtn');
+  const skipBtn = document.getElementById('skipBtn');
+
   let isProcessing = false;
+  let totalOrders = 0;
+  let completedOrders = 0;
+
+  // ETA Calculation
+  const timeSamples = [];
+
+  /**
+   * Calculate and update ETA
+   */
+  function updateProgress(current, total) {
+    if (total <= 0) return;
+
+    const percent = Math.round((current / total) * 100);
+    progressFill.style.width = percent + '%';
+    progressPercent.textContent = percent + '%';
+
+    // Calculate ETA
+    if (current > 0 && timeSamples.length > 0) {
+      const avgTimePerOrder = timeSamples.reduce((a, b) => a + b, 0) / timeSamples.length;
+      const remainingOrders = total - current;
+      const etaSeconds = Math.round(avgTimePerOrder * remainingOrders / 1000);
+
+      if (etaSeconds < 60) {
+        progressEta.textContent = `Còn ~${etaSeconds}s`;
+      } else if (etaSeconds < 3600) {
+        progressEta.textContent = `Còn ~${Math.round(etaSeconds / 60)}p`;
+      } else {
+        progressEta.textContent = `Còn ~${Math.round(etaSeconds / 3600)}h`;
+      }
+    }
+  }
+
+  /**
+   * Show/hide progress bar
+   */
+  function toggleProgress(show) {
+    if (show) {
+      progressContainer.classList.add('show');
+    } else {
+      progressContainer.classList.remove('show');
+    }
+  }
+
+  /**
+   * Show error recovery UI
+   */
+  function showError(title, message, canRetry = true, canSkip = true) {
+    errorTitle.textContent = title || 'Lỗi';
+    errorMessage.textContent = message || 'Đã xảy ra lỗi không mong muốn';
+
+    retryBtn.style.display = canRetry ? 'flex' : 'none';
+    skipBtn.style.display = canSkip ? 'block' : 'none';
+
+    errorRecovery.classList.add('show');
+  }
+
+  /**
+   * Hide error recovery UI
+   */
+  function hideError() {
+    errorRecovery.classList.remove('show');
+  }
 
   /**
    * Validate phone number (Vietnamese format)
@@ -41,7 +118,6 @@ document.addEventListener('DOMContentLoaded', () => {
     logItem.innerHTML = '<span class="log-time">[' + time + ']</span>' + escapeHtml(message);
     logList.appendChild(logItem);
 
-    // FIX: Giới hạn số lượng log để tránh memory leak
     while (logList.children.length > MAX_LOG_ITEMS) {
       logList.removeChild(logList.firstChild);
     }
@@ -53,11 +129,10 @@ document.addEventListener('DOMContentLoaded', () => {
     status.textContent = message;
     status.className = 'status show ' + type;
 
-    // Update status badge
     statusBadge.className = 'status-badge';
     if (type === 'success') {
       statusBadge.classList.add('active');
-      statusBadge.textContent = 'Đang chạy';
+      statusBadge.textContent = 'Hoàn thành';
     } else if (type === 'error') {
       statusBadge.classList.add('error');
       statusBadge.textContent = 'Lỗi';
@@ -80,15 +155,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Clear log
   document.getElementById('clearLogBtn').addEventListener('click', () => {
-    console.log('>>> Xóa log');
     logList.innerHTML = '';
     addLog('Đã xóa nhật ký', 'info');
   });
 
-  addLog('✓ Đã tải Sidebar', 'info');
+  addLog('✓ Đã tải Sidebar v2.1', 'info');
   console.log('>>> UI elements initialized');
 
-  // Start crawl
+  // ============ START CRAWL ============
   startBtn.addEventListener('click', async () => {
     console.log('>>> Click nút Bắt Đầu Crawl');
 
@@ -96,17 +170,16 @@ document.addEventListener('DOMContentLoaded', () => {
     startBtn.innerHTML = '<span class="spinner"></span>Đang khởi động...';
     stopBtn.classList.remove('hidden');
     isProcessing = true;
+    completedOrders = 0;
+    timeSamples.length = 0;
 
+    toggleProgress(true);
+    hideError();
     showStatus('Đang khởi động crawl...', 'processing');
     addLog('>>> Bắt đầu crawl tất cả đơn...', 'info');
 
     try {
-      console.log('>>> Gửi message START_CRAWL đến background...');
-      const response = await chrome.runtime.sendMessage({
-        type: 'START_CRAWL'
-      });
-
-      console.log('>>> Response từ background:', response);
+      const response = await chrome.runtime.sendMessage({ type: 'START_CRAWL' });
 
       if (response?.success) {
         showStatus('Hoàn thành crawl ' + response.count + ' đơn', 'success');
@@ -114,43 +187,57 @@ document.addEventListener('DOMContentLoaded', () => {
         totalOrdersEl.textContent = response.count || 0;
         if (totalConversationsEl) totalConversationsEl.textContent = response.totalConversations ?? 0;
         if (totalMessagesEl) totalMessagesEl.textContent = response.totalMessages ?? 0;
-        console.log('>>> Stats:', response);
+        toggleProgress(false);
       } else {
         const err = response?.error || 'Lỗi không xác định';
         showStatus(err, 'error');
         addLog('✗ Lỗi: ' + err, 'error');
-        startBtn.disabled = false;
-        startBtn.innerHTML = `
-          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
-            <path stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
-          Start
-        `;
-        stopBtn.classList.add('hidden');
+
+        // Show error recovery for circuit breaker
+        if (err.includes('Circuit breaker')) {
+          showError('Circuit Breaker Open', 'Quá nhiều lỗi liên tiếp. Vui lòng kiểm tra kết nối và thử lại sau.', false, false);
+        }
+
+        resetStartButton();
       }
     } catch (e) {
       console.log('>>> Exception:', e);
       showStatus('Lỗi: ' + e.message, 'error');
       addLog('✗ EXCEPTION: ' + e.message, 'error');
-      startBtn.disabled = false;
-      startBtn.innerHTML = `
-        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
-          <path stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-        </svg>
-        Start
-      `;
-      stopBtn.classList.add('hidden');
+
+      showError('Lỗi kết nối', e.message, true, true);
+      resetStartButton();
     }
   });
 
-  // Stop crawl
+  // ============ RETRY BUTTON ============
+  retryBtn.addEventListener('click', async () => {
+    hideError();
+    addLog('>>> Thử lại...', 'info');
+    startBtn.click();
+  });
+
+  // ============ SKIP BUTTON ============
+  skipBtn.addEventListener('click', async () => {
+    hideError();
+    addLog('>>> Bỏ qua lỗi, tiếp tục...', 'warn');
+    // Send message to skip current order and continue
+    await chrome.runtime.sendMessage({ type: 'SKIP_CURRENT_ORDER' });
+  });
+
+  // ============ STOP CRAWL ============
   stopBtn.addEventListener('click', async () => {
     console.log('>>> Click nút Dừng Lại');
     addLog('>>> Đang dừng crawl...', 'warn');
     await chrome.runtime.sendMessage({ type: 'STOP_CRAWL' });
     isProcessing = false;
+    resetStartButton();
+    showStatus('Đã dừng', 'error');
+    addLog('✓ Đã dừng crawl', 'info');
+    toggleProgress(false);
+  });
+
+  function resetStartButton() {
     startBtn.disabled = false;
     startBtn.innerHTML = `
       <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -160,11 +247,9 @@ document.addEventListener('DOMContentLoaded', () => {
       Start
     `;
     stopBtn.classList.add('hidden');
-    showStatus('Đã dừng', 'error');
-    addLog('✓ Đã dừng crawl', 'info');
-  });
+  }
 
-  // Manual Search - Toggle icon để hiện/ẩn input
+  // ============ MANUAL SEARCH ============
   const manualSearchToggle = document.getElementById('manualSearchToggle');
   const manualSearchInput = document.getElementById('manualSearchInput');
   const manualSearchBtn = document.getElementById('manualSearchBtn');
@@ -176,29 +261,22 @@ document.addEventListener('DOMContentLoaded', () => {
 
   manualSearchBtn?.addEventListener('click', async () => {
     let phone = manualPhoneInput?.value?.trim();
-
-    // VALIDATION: Kiểm tra phone number
     if (!phone) {
       addLog('Vui lòng nhập số điện thoại!', 'warn');
       return;
     }
 
-    // Sanitize phone number
     phone = phone.replace(/\D/g, '');
-    if (phone.startsWith('84')) {
-      phone = '0' + phone.substring(2);
-    }
+    if (phone.startsWith('84')) phone = '0' + phone.substring(2);
 
-    // Validate
     if (!isValidPhoneNumber(phone)) {
-      addLog('Số điện thoại không hợp lệ! Vui lòng nhập số Việt Nam (10 chữ số)', 'error');
+      addLog('Số điện thoại không hợp lệ!', 'error');
       return;
     }
 
     addLog('>>> Manual search: ' + phone, 'info');
 
     try {
-      // Get active tab
       const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
       if (!tabs[0]) {
         addLog('Không tìm thấy tab!', 'error');
@@ -207,25 +285,21 @@ document.addEventListener('DOMContentLoaded', () => {
 
       const tabId = tabs[0].id;
 
-      // Check if on Salework
       if (!tabs[0].url?.includes('salework.net')) {
         addLog('Đang chuyển đến Salework...', 'info');
         await chrome.tabs.update(tabId, { url: 'https://zalo.salework.net/' });
         await new Promise(r => setTimeout(r, 3000));
       }
 
-      // Inject content script (OPTIMIZED: Sử dụng bundle)
       addLog('Đang inject script...', 'info');
       await chrome.scripting.executeScript({
         target: { tabId: tabId },
-        files: ['content/bundle.js'] // Thay vì 5 files riêng biệt
+        files: ['content/bundle.js']
       });
 
       await new Promise(r => setTimeout(r, 1000));
 
-      // Send FILL_AND_SEARCH message với timeout
       addLog('Đang search SDT: ' + phone, 'info');
-
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 30000);
 
@@ -239,73 +313,81 @@ document.addEventListener('DOMContentLoaded', () => {
       } catch (e) {
         clearTimeout(timeoutId);
         if (e.message?.includes('timeout') || e.message?.includes('abort')) {
-          addLog('Timeout! Không nhận được phản hồi từ content script', 'error');
+          addLog('Timeout!', 'error');
         } else {
           throw e;
         }
       }
-
     } catch (e) {
       addLog('Lỗi: ' + e.message, 'error');
     }
   });
 
-  // Listen for status updates from background
+  // ============ MESSAGE LISTENER ============
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     console.log('>>> Popup nhận message:', message);
 
     if (message.type === 'LOG_MESSAGE') {
-      console.log('>>> Popup log:', message.message);
       addLog(message.message, message.logType || 'info');
-    } else if (message.type === 'STATUS_UPDATE') {
-      console.log('>>> STATUS_UPDATE - status:', message.status);
+    }
 
+    if (message.type === 'STATUS_UPDATE') {
       if (message.status === 'processing') {
-        console.log('>>> Đang xử lý - current:', message.current, 'total:', message.total, 'phone:', message.phone);
-        totalOrdersEl.textContent = message.current;
-        showStatus('Đang xử lý: ' + message.phone + ' (' + message.current + '/' + message.total + ')', 'processing');
-        addLog('>>> Xử lý: ' + message.phone + ' (' + message.current + '/' + message.total + ')', 'info');
-      } else if (message.status === 'done') {
-        console.log('>>> Hoàn thành!', message);
+        totalOrders = message.total || 0;
+        completedOrders = message.current || 0;
+
+        totalOrdersEl.textContent = completedOrders;
+        showStatus('Đang xử lý: ' + message.phone + ' (' + completedOrders + '/' + totalOrders + ')', 'processing');
+        addLog('>>> Xử lý: ' + message.phone, 'info');
+
+        // Update progress
+        if (totalOrders > 0) {
+          updateProgress(completedOrders, totalOrders);
+        }
+
+        // Track time for ETA
+        if (message.lastOrderTime) {
+          timeSamples.push(message.lastOrderTime);
+          if (timeSamples.length > PROGRESS_ESTIMATE_SAMPLES) {
+            timeSamples.shift();
+          }
+        }
+      }
+
+      if (message.status === 'done') {
         totalOrdersEl.textContent = message.totalOrders ?? totalOrdersEl.textContent;
         if (totalConversationsEl) totalConversationsEl.textContent = message.totalConversations ?? 0;
         if (totalMessagesEl) totalMessagesEl.textContent = message.totalMessages ?? 0;
         showStatus('Hoàn thành!', 'success');
         addLog('✓ HOÀN THÀNH! Đơn: ' + (message.totalOrders ?? 0) + ' | Hội thoại: ' + (message.totalConversations ?? 0) + ' | Tin nhắn: ' + (message.totalMessages ?? 0), 'success');
-        startBtn.disabled = false;
-        startBtn.innerHTML = `
-          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
-            <path stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
-          Start
-        `;
-        stopBtn.classList.add('hidden');
-      } else if (message.status === 'error') {
-        console.log('>>> Lỗi:', message.error);
+        resetStartButton();
+        toggleProgress(false);
+      }
+
+      if (message.status === 'error') {
         showStatus('Lỗi: ' + message.error, 'error');
         addLog('✗ Lỗi: ' + message.error, 'error');
-        startBtn.disabled = false;
-        startBtn.innerHTML = `
-          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
-            <path stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
-          Start
-        `;
-        stopBtn.classList.add('hidden');
+
+        // Show error recovery
+        showError('Lỗi', message.error, true, true);
+        resetStartButton();
+      }
+
+      if (message.status === 'circuit_breaker') {
+        showError('Circuit Breaker Open', 'Quá 5 lần lỗi liên tiếp. Hệ thống tạm dừng để bảo vệ.', false, false);
+        resetStartButton();
+        toggleProgress(false);
       }
     }
   });
 
   // Get initial status
-  console.log('>>> Gửi message GET_STATUS...');
   chrome.runtime.sendMessage({ type: 'GET_STATUS' }, (response) => {
-    console.log('>>> Initial status:', response);
     if (response?.isProcessing) {
       showStatus('Đang xử lý...', 'processing');
       startBtn.disabled = true;
       stopBtn.classList.remove('hidden');
+      toggleProgress(true);
     }
   });
 
