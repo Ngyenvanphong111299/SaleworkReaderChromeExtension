@@ -10,10 +10,10 @@
 
 // ============ SHARED CONFIG ============
 const DYNAMIC_CONFIG = {
-  minInterval: 300,
+  minInterval: 2000,
   maxInterval: 1500,
   scrollMaxInterval: 2000,
-  scrollTimeout: 30000,
+  scrollTimeout: 200000,
   defaultTimeout: 10000
 };
 
@@ -194,7 +194,7 @@ async function clickConversation(conv, index, total) {
   }
 
   conv.scrollIntoView({ block: 'center', behavior: 'instant' });
-  await new Promise(r => setTimeout(r, 300));
+  await new Promise(r => setTimeout(r, 2000));
 
   function doClick(el) {
     const opts = { bubbles: true, cancelable: true, view: window };
@@ -208,7 +208,7 @@ async function clickConversation(conv, index, total) {
   let found = await waitForCondition(
     () => document.querySelector('.z2-message-container, [class*="message-container"]') !== null,
     8000,
-    300,
+    2000,
     1200
   );
 
@@ -221,7 +221,7 @@ async function clickConversation(conv, index, total) {
       found = await waitForCondition(
         () => document.querySelector('.z2-message-container, [class*="message-container"]') !== null,
         6000,
-        300,
+        2000,
         1200
       );
     }
@@ -264,7 +264,157 @@ function findScrollContainer() {
   return body;
 }
 
+// Cache để lưu tin nhắn đã xóa khỏi DOM
+const messageCache = {
+  messages: [],
+  maxCache: 2000, // Tăng lên để lưu nhiều tin nhắn
+
+  add(messages) {
+    this.messages.unshift(...messages);
+    if (this.messages.length > this.maxCache) {
+      this.messages = this.messages.slice(0, this.maxCache);
+    }
+  },
+
+  getAll() {
+    return this.messages;
+  },
+
+  clear() {
+    this.messages = [];
+  }
+};
+
+// Extract message data từ container element (dùng cho cả extractMessages và cleanup)
+function extractMessageData(container, index) {
+  const timestampMarker = container.querySelector('div.w-100.text-center span');
+  if (timestampMarker) {
+    const dateTime = timestampMarker.textContent.trim();
+    if (dateTime) {
+      return {
+        id: 'timestamp_' + index,
+        content: dateTime,
+        time: dateTime,
+        type: 'timestamp',
+        messageType: 'timestamp'
+      };
+    }
+  }
+
+  const isRight = container.querySelector('.z2-message-item-right-container') !== null;
+  const msgType = isRight ? 'sent' : 'received';
+
+  let time = '';
+  const footerEl = container.querySelector('.z2-message-item-right-footer') || container.querySelector('.z2-message-item-left-footer');
+  if (footerEl) {
+    const timeEl = footerEl.querySelector('.el-tooltip');
+    if (timeEl) time = timeEl.textContent.trim();
+  }
+
+  const msgId = container.id || 'msg_' + index;
+
+  // Quoted content
+  const quotedContentEl = container.querySelector('.z2-message-reply-quoted-content');
+  const quotedSenderEl = container.querySelector('.z2-message-reply-quoted-sender');
+  const quotedContent = quotedContentEl?.textContent?.trim();
+  const quotedSender = quotedSenderEl?.textContent?.trim();
+
+  // Message content
+  let content = '';
+  let textEl = container.querySelector('.z2-message-item-right-content span[id="regexText"]');
+  if (!textEl) textEl = container.querySelector('.z2-message-item-left-content span[id="regexText"]');
+  if (!textEl) textEl = container.querySelector('.z2-message-item-right .mb-0.text-normal span');
+  if (!textEl) textEl = container.querySelector('.z2-message-item-left .mb-0.text-normal span');
+  if (!textEl) {
+    const contentDiv = container.querySelector('.z2-message-item-right-content, .z2-message-item-left-content');
+    if (contentDiv) {
+      const spans = contentDiv.querySelectorAll('span');
+      for (const span of spans) {
+        const text = span.textContent?.trim();
+        if (text && text.length > 0 && !text.includes('Trả lời') && !text.includes('Chuyển tiếp') &&
+            !text.includes('Ghim') && !text.includes('Copy') && !text.includes('Xoá') &&
+            !text.includes('Lưu ảnh') && !text.includes('Chọn nhiều') && !text.includes('Thu hồi')) {
+          textEl = span;
+          break;
+        }
+      }
+    }
+  }
+
+  if (textEl) content = textEl.textContent.trim();
+
+  // Images
+  const imageUrls = [];
+  const isMultiImage = container.querySelector('.group-img-container') !== null;
+
+  if (isMultiImage) {
+    const imgs = container.querySelectorAll('.group-img-container img');
+    imgs.forEach(img => {
+      const src = img.src || img.getAttribute('src');
+      if (src && !isUiIcon(src)) imageUrls.push(src);
+    });
+  }
+
+  if (imageUrls.length === 0) {
+    const photoContainer = container.querySelector('.photo-container');
+    if (photoContainer) {
+      const imgSelectors = ['img.el-image__preview', 'img.el-image__inner', 'img[src]'];
+      for (const sel of imgSelectors) {
+        const imgs = photoContainer.querySelectorAll(sel);
+        imgs.forEach(img => {
+          const src = img.src || img.getAttribute('src');
+          if (src && !isUiIcon(src)) imageUrls.push(src);
+        });
+      }
+    }
+  }
+
+  return {
+    id: msgId,
+    content: content,
+    time: time,
+    type: msgType,
+    messageType: msgType,
+    quotedContent: quotedContent || null,
+    quotedSender: quotedSender || null,
+    images: imageUrls.length > 0 ? imageUrls : null
+  };
+}
+
+// Xóa tin nhắn mới ở trên cùng để giữ tin nhắn cũ
+function cleanupOldMessages(keepCount = 100) {
+  const containers = document.querySelectorAll('.z2-message-container');
+  if (containers.length <= keepCount) return 0;
+
+  // SaleWork: containers[0] = tin mới nhất (trên), containers[length-1] = tin cũ nhất (dưới)
+  // Khi scroll lên: thêm tin cũ ở trên → cần xóa tin mới ở trên
+  const toRemove = containers.length - keepCount;
+  const removedMessages = [];
+
+  // Xóa từ ĐẦU mảng (tin mới nhất) - giữ lại cuối mảng (tin cũ)
+  for (let i = 0; i < toRemove; i++) {
+    const el = containers[i]; // Lấy từ đầu = tin mới nhất
+    // Extract full message data trước khi xóa
+    const msgData = extractMessageData(el, i);
+    removedMessages.push(msgData);
+    el.remove();
+  }
+
+  if (removedMessages.length > 0) {
+    messageCache.add(removedMessages);
+    console.log('>>> [CLEANUP] Đã xóa ' + removedMessages.length + ' tin nhắn mới (trên), giữ ' + keepCount + ' tin cũ, cache: ' + messageCache.messages.length);
+  }
+
+  return removedMessages.length;
+}
+
+// Biến lưu tất cả tin nhắn đã extract
+let allExtractedMessages = [];
+
 async function scrollUpToLoadMessages() {
+  // Reset biến khi bắt đầu scroll mới
+  allExtractedMessages = [];
+
   await waitForCondition(
     () => document.querySelectorAll('.z2-message-container').length > 0,
     8000,
@@ -297,53 +447,100 @@ async function scrollUpToLoadMessages() {
 
   while (true) {
     i++;
-    const countBefore = getMessageCount();
 
-    // Bước 1: Scroll xuống bottom (scroll = 0)
+    // Bước 1: Extract tin nhắn hiện tại và push vào array
+    const currentContainers = document.querySelectorAll('.z2-message-container');
+    const currentMessages = extractAllMessagesFromDOM(currentContainers);
+    allExtractedMessages.push(...currentMessages);
+
+    // Bước 2: Đánh dấu tất cả tin nhắn hiện tại với data-loaded="true"
+    currentContainers.forEach(el => el.setAttribute('data-loaded', 'true'));
+
+    const countBefore = currentContainers.length;
+
+    if (chrome.runtime) {
+      chrome.runtime.sendMessage({
+        type: 'CONTENT_LOG',
+        text: 'Scroll ' + i + ': extract ' + currentMessages.length + ' tin nhan, total: ' + allExtractedMessages.length,
+        logType: 'success'
+      });
+    }
+
+    // Bước 3: Scroll xuống bottom trước
     currentContainer.scrollTop = 0;
     currentContainer.dispatchEvent(new Event('scroll', { bubbles: true }));
-    await new Promise(r => setTimeout(r, 300));
+    await new Promise(r => setTimeout(r, 1500));
 
-    // Bước 2: Scroll lên top (-99999)
+    // Bước 4: Scroll lên top để load tin nhắn mới hơn
     currentContainer.scrollTop = -99999;
     currentContainer.scrollBy(0, -99999);
     currentContainer.dispatchEvent(new Event('scroll', { bubbles: true }));
 
-    await new Promise(r => setTimeout(r, 800));
+    await new Promise(r => setTimeout(r, 1000));
 
+    // Chờ tin mới load xong
     let hasProgress = await waitForCondition(
-      () => getMessageCount() > countBefore,
+      () => {
+        const total = document.querySelectorAll('.z2-message-container').length;
+        const loaded = document.querySelectorAll('.z2-message-container[data-loaded="true"]').length;
+        const newMessages = total - loaded;
+        return newMessages > 0;
+      },
       4000,
-      400,
+      500,
       DYNAMIC_CONFIG.scrollMaxInterval
     );
 
-    const countAfter = getMessageCount();
+    const totalAfter = document.querySelectorAll('.z2-message-container').length;
+    const loadedAfter = document.querySelectorAll('.z2-message-container[data-loaded="true"]').length;
+    const newMessages = totalAfter - loadedAfter;
 
-    if (chrome.runtime && i <= 3) {
+    if (chrome.runtime) {
       chrome.runtime.sendMessage({
         type: 'CONTENT_LOG',
-        text: 'Scroll ' + i + ': ' + countAfter + ' tin nhan' + (countAfter > countBefore ? ' (+' + (countAfter - countBefore) + ')' : ''),
-        logType: countAfter > countBefore ? 'success' : 'info'
+        text: 'Scroll ' + i + ': ' + totalAfter + ' tin (mới: ' + newMessages + ')',
+        logType: newMessages > 0 ? 'success' : 'info'
       });
     }
 
-    if (countAfter === countBefore || !hasProgress) {
+    if (newMessages === 0 || !hasProgress) {
       noChangeCount++;
       if (noChangeCount >= MAX_NO_CHANGE) break;
     } else {
       noChangeCount = 0;
     }
 
-    lastCount = countAfter;
+    // Bước 5: Xóa các tin nhắn đã đánh dấu (đã extract)
+    const loadedElements = document.querySelectorAll('.z2-message-container[data-loaded="true"]');
+    loadedElements.forEach(el => el.remove());
+
+    lastCount = allExtractedMessages.length;
 
     if (i >= MAX_SCROLL_ATTEMPTS) break;
   }
 
+  // Bước cuối: Duyệt lại toàn bộ array để gán timestamp cho các tin nhắn
+  let lastTimestampDate = null;
+  for (let i = allExtractedMessages.length - 1; i >= 0; i--) {
+    const m = allExtractedMessages[i];
+    if (m.type === 'timestamp') {
+      lastTimestampDate = parseDateFromTimestamp(m.time);
+    } else if (lastTimestampDate && m.time && /^\d{1,2}:\d{2}$/.test(m.time.trim())) {
+      m.time = lastTimestampDate + ' ' + m.time.trim();
+    }
+  }
+
   if (chrome.runtime) {
-    chrome.runtime.sendMessage({ type: 'CONTENT_LOG', text: 'Scroll xong: ' + lastCount + ' tin nhan', logType: 'info' });
+    chrome.runtime.sendMessage({
+      type: 'CONTENT_LOG',
+      text: 'Scroll xong: ' + allExtractedMessages.length + ' tin nhan',
+      logType: 'info'
+    });
   }
 }
+
+// Export messages để truy cập từ module khác
+window.__allMessages = allExtractedMessages;
 
 // ============ MODULE 04: EXTRACT ============
 const UI_ICON_PATTERNS = ['emoji', 'icon', 'three_dots', 'assets/images'];
@@ -495,16 +692,30 @@ function extractMessages() {
     }
   });
 
-  // Pass 2: Duyệt ngược - timestamp đánh dấu ngày cho các tin nhắn PHÍA TRƯỚC nó trong DOM
-  let lastTimestampDate = null;
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const m = messages[i];
-    if (m.type === 'timestamp') {
-      lastTimestampDate = parseDateFromTimestamp(m.time);
-    } else if (lastTimestampDate && m.time && /^\d{1,2}:\d{2}$/.test(m.time.trim())) {
-      m.time = lastTimestampDate + ' ' + m.time.trim();
+  // Trả về allExtractedMessages (đã được xử lý timestamp ở cuối scroll)
+  return allExtractedMessages;
+}
+
+// Extract tin nhắn từ DOM hiện tại (dùng trong khi scroll)
+function extractMessagesFromDOM() {
+  const containers = document.querySelectorAll('.z2-message-container:not([data-loaded="true"])');
+  return extractAllMessagesFromDOM(containers);
+}
+
+// Extract tất cả tin nhắn từ containers được truyền vào
+function extractAllMessagesFromDOM(containers) {
+  const messages = [];
+
+  containers.forEach((container, index) => {
+    try {
+      const msgData = extractMessageData(container, index);
+      if (msgData.content || msgData.images) {
+        messages.push(msgData);
+      }
+    } catch (e) {
+      console.error('Error extracting message:', e);
     }
-  }
+  });
 
   return messages;
 }
