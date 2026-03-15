@@ -300,22 +300,30 @@ document.addEventListener('DOMContentLoaded', () => {
       await new Promise(r => setTimeout(r, 1000));
 
       addLog('Đang search SDT: ' + phone, 'info');
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 30000);
 
       try {
-        await chrome.tabs.sendMessage(tabId, {
+        // Gửi message và đợi response
+        const response = await chrome.tabs.sendMessage(tabId, {
           type: 'FILL_AND_SEARCH',
           phoneNumber: phone
         });
-        clearTimeout(timeoutId);
-        addLog('Đã gửi yêu cầu search!', 'success');
+
+        console.log('>>> Response from content:', response);
+        addLog('Phản hồi: ' + JSON.stringify(response)?.substring(0, 100), response?.success ? 'success' : 'warn');
+
+        if (response?.success) {
+          addLog('Hoàn thành! ' + response.messages?.length + ' tin nhắn, ' + response.conversationsCount + ' hội thoại', 'success');
+        } else if (response?.error) {
+          addLog('Lỗi: ' + response.error, 'error');
+        }
       } catch (e) {
-        clearTimeout(timeoutId);
-        if (e.message?.includes('timeout') || e.message?.includes('abort')) {
-          addLog('Timeout!', 'error');
+        console.log('>>> SendMessage error:', e);
+        if (e.message?.includes('No message received')) {
+          addLog('Content script không phản hồi!', 'error');
+        } else if (e.message?.includes('Could not establish connection')) {
+          addLog('Lỗi kết nối. Refresh page và thử lại!', 'error');
         } else {
-          throw e;
+          addLog('Lỗi: ' + e.message, 'error');
         }
       }
     } catch (e) {

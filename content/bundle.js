@@ -104,13 +104,27 @@ function fillPhoneNumber(phoneNumber) {
   const input = findSearchInput();
 
   if (input) {
+    console.log('[FILL_PHONE] Found input, filling:', phoneNumber);
     input.value = '';
     input.value = phoneNumber;
     input.dispatchEvent(new Event('input', { bubbles: true }));
     input.dispatchEvent(new Event('change', { bubbles: true }));
+
+    // Press Enter to trigger search
+    const enterEvent = new KeyboardEvent('keydown', {
+      key: 'Enter',
+      code: 'Enter',
+      keyCode: 13,
+      which: 13,
+      bubbles: true
+    });
+    input.dispatchEvent(enterEvent);
+    console.log('[FILL_PHONE] Dispatched Enter key');
+
     input.dispatchEvent(new Event('blur', { bubbles: true }));
     return true;
   }
+  console.log('[FILL_PHONE] Input NOT found!');
   return false;
 }
 
@@ -413,19 +427,29 @@ async function waitForConversationsLoaded() {
 }
 
 function fillAndSearchAndClick(phoneNumber) {
+  console.log('[FILL_SEARCH] Starting for:', phoneNumber);
   return new Promise(function (resolve) {
     let currentRetry = 0;
 
     async function doSearchAndCrawl() {
+      console.log('[FILL_SEARCH] Step 1: fillPhoneNumber');
       const inputFilled = fillPhoneNumber(phoneNumber);
+      console.log('[FILL_SEARCH] Input filled:', inputFilled);
       if (!inputFilled) return null;
 
-      const buttonClicked = findAndClickSearchButton();
-      if (!buttonClicked) {
-        buttonClicked?.click();
+      console.log('[FILL_SEARCH] Step 2: findAndClickSearchButton');
+      const button = findAndClickSearchButton();
+      console.log('[FILL_SEARCH] Button found:', button ? 'yes' : 'no');
+      if (button) {
+        button.click();
+        console.log('[FILL_SEARCH] Button clicked');
+      } else {
+        console.log('[FILL_SEARCH] Button NOT found!');
       }
 
+      console.log('[FILL_SEARCH] Step 3: waitForConversationsLoaded');
       const allConvs = await waitForConversationsLoaded();
+      console.log('[FILL_SEARCH] Conversations found:', allConvs.length);
       if (allConvs.length === 0) return [];
 
       return allConvs;
