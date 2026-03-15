@@ -178,6 +178,7 @@ document.addEventListener('DOMContentLoaded', () => {
       phoneNumber: phoneNumber,
       conversations: conversations.map(c => ({
         staffName: c.staffName,
+        userName: c.userName || undefined,
         messages: c.messages.map(cleanMsg)
       })),
       replaceExisting: true

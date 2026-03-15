@@ -340,6 +340,8 @@ function extractMessageData(container, index) {
   if (!textEl) textEl = container.querySelector('.z2-message-item-left-content span[id="regexText"]');
   if (!textEl) textEl = container.querySelector('.z2-message-item-right .mb-0.text-normal span');
   if (!textEl) textEl = container.querySelector('.z2-message-item-left .mb-0.text-normal span');
+  // Text trực tiếp trong div (ảnh + nội dung: div.mb-0.mt-1.mx-12.text-normal)
+  if (!textEl) textEl = container.querySelector('.text-normal.mb-0, .mb-0.mt-1.mx-12.text-normal');
   if (!textEl) {
     const contentDiv = container.querySelector('.z2-message-item-right-content, .z2-message-item-left-content');
     if (contentDiv) {
@@ -358,41 +360,56 @@ function extractMessageData(container, index) {
 
   if (textEl) content = textEl.textContent.trim();
 
-  // Images
+  // Images - hỗ trợ cấu trúc mới: .photo-container, .group-img-container, .el-image
   const imageUrls = [];
   const isMultiImage = container.querySelector('.group-img-container') !== null;
 
   if (isMultiImage) {
-    const imgs = container.querySelectorAll('.group-img-container img');
-    imgs.forEach(img => {
+    container.querySelectorAll('.group-img-container img').forEach(img => {
       const src = img.src || img.getAttribute('src');
       if (src && !isUiIcon(src)) imageUrls.push(src);
     });
   }
 
   if (imageUrls.length === 0) {
-    const photoContainer = container.querySelector('.photo-container');
-    if (photoContainer) {
-      const imgSelectors = ['img.el-image__preview', 'img.el-image__inner', 'img[src]'];
-      for (const sel of imgSelectors) {
-        const imgs = photoContainer.querySelectorAll(sel);
-        imgs.forEach(img => {
-          const src = img.src || img.getAttribute('src');
-          if (src && !isUiIcon(src)) imageUrls.push(src);
-        });
-      }
-    }
+    // Tin nhắn 1 ảnh: .photo-container > .el-image > img
+    container.querySelectorAll('.photo-container img').forEach(img => {
+      const src = img.src || img.getAttribute('src');
+      if (src && !isUiIcon(src)) imageUrls.push(src);
+    });
   }
+
+  if (imageUrls.length === 0) {
+    container.querySelectorAll('.el-image img').forEach(img => {
+      const src = img.src || img.getAttribute('src');
+      if (src && !isUiIcon(src)) imageUrls.push(src);
+    });
+  }
+
+  if (imageUrls.length === 0) {
+    container.querySelectorAll('img[src*="zdn.vn"]').forEach(img => {
+      const src = img.src || img.getAttribute('src');
+      if (src && !isUiIcon(src)) imageUrls.push(src);
+    });
+  }
+
+  // imageUrl cho backend (1 ảnh = string, nhiều ảnh = JSON string)
+  let imageUrl = null;
+  if (imageUrls.length === 1) imageUrl = imageUrls[0];
+  else if (imageUrls.length > 1) imageUrl = JSON.stringify(imageUrls);
+
+  if (imageUrl && !content) content = '[Hình ảnh]';
 
   return {
     id: msgId,
     content: content,
     time: time,
     type: msgType,
-    messageType: msgType,
+    messageType: imageUrl ? 'image' : 'text',
     quotedContent: quotedContent || null,
     quotedSender: quotedSender || null,
-    images: imageUrls.length > 0 ? imageUrls : null
+    images: imageUrls.length > 0 ? imageUrls : null,
+    imageUrl: imageUrl || undefined
   };
 }
 
@@ -724,7 +741,7 @@ function extractAllMessagesFromDOM(containers) {
   containers.forEach((container, index) => {
     try {
       const msgData = extractMessageData(container, index);
-      if (msgData.content || msgData.images) {
+      if (msgData.content || msgData.images || msgData.imageUrl) {
         messages.push(msgData);
       }
     } catch (e) {
@@ -761,6 +778,18 @@ async function waitForConversationsLoaded() {
  * @param {Element} convElement - Conversation item element
  * @returns {Promise<string|null>} - Tên tư vấn viên hoặc null
  */
+/**
+ * Lấy tên khách hàng từ .name-conversation (VD: "Natadoor 0909168466 38")
+ * @param {Element} convElement - Conversation item element
+ * @returns {string|null}
+ */
+function getUserNameFromConversation(convElement) {
+  const nameEl = convElement.querySelector('.name-conversation');
+  if (!nameEl) return null;
+  const text = nameEl.textContent?.trim().replace(/\s+/g, ' ');
+  return text || null;
+}
+
 async function getStaffNameFromAvatarTooltip(convElement) {
   const avatarEl = convElement.querySelector('.z2-avatar-tooltip[aria-describedby]');
   if (!avatarEl) return null;
@@ -839,6 +868,7 @@ function fillAndSearchAndClick(phoneNumber) {
       for (let convIdx = 0; convIdx < allConvs.length; convIdx++) {
         const conv = allConvs[convIdx];
         const staffName = (await getStaffNameFromAvatarTooltip(conv)) || 'Conv ' + (convIdx + 1);
+        const userName = getUserNameFromConversation(conv);
 
         await clickConversation(conv, convIdx, allConvs.length);
         await scrollUpToLoadMessages();
@@ -846,7 +876,7 @@ function fillAndSearchAndClick(phoneNumber) {
         const messages = extractMessages();
 
         const messagesWithStaff = messages.map((msg, idx) => ({ ...msg, staffName: staffName, order: idx }));
-        conversations.push({ staffName, messages: messagesWithStaff });
+        conversations.push({ staffName, userName: userName || undefined, messages: messagesWithStaff });
 
         if (convIdx < allConvs.length - 1) {
           await new Promise(r => setTimeout(r, BETWEEN_CONV_MS));
@@ -905,7 +935,8 @@ window.__crawlerBundle = {
   getMessageCount,
   extractMessages,
   fillAndSearchAndClick,
-  getStaffNameFromAvatarTooltip
+  getStaffNameFromAvatarTooltip,
+  getUserNameFromConversation
 };
 
 console.log('========================================');
