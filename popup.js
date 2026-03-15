@@ -2,7 +2,21 @@
 
 // ============ CONFIG ============
 const MAX_LOG_ITEMS = 100;
-const API_BASE = 'http://localhost:5153/api/v1';
+
+// API Domain Config - Switch between environments
+const API_DOMAIN = {
+  // Options: 'localhost' or 'production'
+  current: 'localhost',
+
+  localhost: 'http://localhost:5153/api/v1',
+  production: 'https://omnichannel.hoangkimeco.com/api/v1',
+
+  get() {
+    return this[this.current];
+  }
+};
+
+const API_BASE = API_DOMAIN.get();
 const PROGRESS_ESTIMATE_SAMPLES = 5; // Số mẫu để tính ETA
 
 document.addEventListener('DOMContentLoaded', () => {

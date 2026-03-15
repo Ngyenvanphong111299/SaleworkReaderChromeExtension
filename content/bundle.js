@@ -299,6 +299,12 @@ async function scrollUpToLoadMessages() {
     i++;
     const countBefore = getMessageCount();
 
+    // Bước 1: Scroll xuống bottom (scroll = 0)
+    currentContainer.scrollTop = 0;
+    currentContainer.dispatchEvent(new Event('scroll', { bubbles: true }));
+    await new Promise(r => setTimeout(r, 300));
+
+    // Bước 2: Scroll lên top (-99999)
     currentContainer.scrollTop = -99999;
     currentContainer.scrollBy(0, -99999);
     currentContainer.dispatchEvent(new Event('scroll', { bubbles: true }));

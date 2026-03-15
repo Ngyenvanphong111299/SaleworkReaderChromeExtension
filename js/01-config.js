@@ -3,7 +3,7 @@
 // ============ ENVIRONMENT CONFIG ============
 export const ENV_CONFIG = {
   // Chế độ: 'development' hoặc 'production'
-  mode: 'development',
+  mode: 'production',
 
   // Development settings
   development: {
@@ -13,9 +13,17 @@ export const ENV_CONFIG = {
 
   // Production settings
   production: {
-    // TODO: Thay bằng production API URL khi deploy
-    apiBase: 'https://api.yourdomain.com/api/v1',
+    apiBase: 'https://omnichannel.hoangkimeco.com/api/v1',
     logLevel: 'info'
+  },
+
+  // Switch domain between environments
+  switchDomain(domain) {
+    if (domain === 'localhost' || domain === 'production') {
+      this.mode = domain;
+      return true;
+    }
+    return false;
   },
 
   getApiBase() {
