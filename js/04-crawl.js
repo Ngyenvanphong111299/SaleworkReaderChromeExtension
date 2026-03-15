@@ -154,7 +154,7 @@ export async function processPhone(phoneNumber) {
   }
 }
 
-export async function startCrawl() {
+export async function startCrawl(orderLimit = 99999) {
   if (isProcessing) {
     logToPopup('Dang xu ly...', 'warn');
     return { success: false, error: 'Dang xu ly' };
@@ -203,6 +203,11 @@ export async function startCrawl() {
       const { order, phoneNumber } = result;
       currentPhoneNumber = phoneNumber;
       totalCrawled++;
+
+      if (totalCrawled > orderLimit) {
+        logToPopup('Da dat gioi han ' + orderLimit + ' don, dung lai', 'info');
+        break;
+      }
 
       chrome.runtime.sendMessage({
         type: 'STATUS_UPDATE',

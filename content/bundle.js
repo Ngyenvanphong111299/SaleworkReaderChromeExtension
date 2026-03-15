@@ -613,7 +613,7 @@ function fillAndSearchAndClick(phoneNumber) {
 
         const messages = extractMessages();
 
-        const messagesWithStaff = messages.map(msg => ({ ...msg, staffName: staffName }));
+        const messagesWithStaff = messages.map((msg, idx) => ({ ...msg, staffName: staffName, order: idx }));
         conversations.push({ staffName, messages: messagesWithStaff });
 
         if (convIdx < allConvs.length - 1) {

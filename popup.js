@@ -1,9 +1,11 @@
-// Sidebar popup script (v2.1 - Enhanced with Progress & Error Recovery)
+// Sidebar popup script (v2.1 - Enhanced with Progress & Error Recovery + Settings)
 
 // ============ CONFIG ============
 const MAX_LOG_ITEMS = 100;
-const API_BASE = 'http://localhost:5153/api/v1';
 const PROGRESS_ESTIMATE_SAMPLES = 5; // Số mẫu để tính ETA
+
+// Settings - sẽ được load từ chrome.storage
+let API_BASE = 'https://omnichannel.hoangkimeco.com/api/v1';
 
 document.addEventListener('DOMContentLoaded', () => {
   // UI Elements
@@ -29,9 +31,139 @@ document.addEventListener('DOMContentLoaded', () => {
   const retryBtn = document.getElementById('retryBtn');
   const skipBtn = document.getElementById('skipBtn');
 
+  // Settings Elements
+  const settingsBtn = document.getElementById('settingsBtn');
+  const settingsPanel = document.getElementById('settingsPanel');
+  const closeSettingsBtn = document.getElementById('closeSettingsBtn');
+  const apiUrlInput = document.getElementById('apiUrlInput');
+  const modeSelect = document.getElementById('modeSelect');
+  const logLevelSelect = document.getElementById('logLevelSelect');
+  const delayInput = document.getElementById('delayInput');
+  const saveSettingsBtn = document.getElementById('saveSettingsBtn');
+  const resetSettingsBtn = document.getElementById('resetSettingsBtn');
+  const settingsStatus = document.getElementById('settingsStatus');
+
   let isProcessing = false;
   let totalOrders = 0;
   let completedOrders = 0;
+
+  // ============ SETTINGS FUNCTIONS ============
+
+  /**
+   * Load settings from chrome.storage and populate form
+   */
+  async function loadSettings() {
+    try {
+      const result = await chrome.storage.local.get('salework_crawler_settings');
+      const settings = result.salework_crawler_settings || {};
+
+      // Populate form
+      apiUrlInput.value = settings.apiBaseUrl || 'https://omnichannel.hoangkimeco.com/api/v1';
+      modeSelect.value = settings.mode || 'production';
+      logLevelSelect.value = settings.logLevel || 'info';
+      delayInput.value = (settings.delayBetweenOrders || 15000) / 1000;
+
+      // Update API_BASE
+      API_BASE = settings.apiBaseUrl || 'https://omnichannel.hoangkimeco.com/api/v1';
+
+      addLog('info', 'Đã tải cài đặt: ' + API_BASE);
+    } catch (e) {
+      console.error('Lỗi load settings:', e);
+    }
+  }
+
+  /**
+   * Save settings to chrome.storage
+   */
+  async function saveSettings() {
+    const newApiUrl = apiUrlInput.value.trim();
+    const newMode = modeSelect.value;
+    const newLogLevel = logLevelSelect.value;
+    const newDelaySeconds = parseInt(delayInput.value) || 15;
+
+    if (!newApiUrl) {
+      settingsStatus.textContent = 'Vui lòng nhập API URL';
+      settingsStatus.className = 'settings-status error';
+      return;
+    }
+
+    try {
+      const settings = {
+        apiBaseUrl: newApiUrl,
+        mode: newMode,
+        logLevel: newLogLevel,
+        delayBetweenOrders: newDelaySeconds * 1000,
+        defaultOrderLimit: 99999,
+        showNotifications: true,
+        autoOpenSidePanel: true
+      };
+
+      await chrome.storage.local.set({ salework_crawler_settings: settings });
+
+      // Update API_BASE
+      API_BASE = newApiUrl;
+
+      settingsStatus.textContent = 'Đã lưu cài đặt!';
+      settingsStatus.className = 'settings-status success';
+
+      addLog('info', 'Đã cập nhật API: ' + API_BASE);
+
+      // Hide status after 2s
+      setTimeout(() => {
+        settingsStatus.className = 'settings-status';
+      }, 2000);
+    } catch (e) {
+      settingsStatus.textContent = 'Lỗi lưu: ' + e.message;
+      settingsStatus.className = 'settings-status error';
+    }
+  }
+
+  /**
+   * Reset settings to default
+   */
+  async function resetSettings() {
+    const defaultSettings = {
+      apiBaseUrl: 'https://omnichannel.hoangkimeco.com/api/v1',
+      mode: 'production',
+      logLevel: 'info',
+      delayBetweenOrders: 15000,
+      defaultOrderLimit: 99999,
+      showNotifications: true,
+      autoOpenSidePanel: true
+    };
+
+    await chrome.storage.local.set({ salework_crawler_settings: defaultSettings });
+
+    API_BASE = defaultSettings.apiBaseUrl;
+
+    // Reload form
+    await loadSettings();
+
+    settingsStatus.textContent = 'Đã reset về mặc định!';
+    settingsStatus.className = 'settings-status success';
+
+    addLog('info', 'Đã reset cài đặt về mặc định');
+
+    setTimeout(() => {
+      settingsStatus.className = 'settings-status';
+    }, 2000);
+  }
+
+  // Settings event listeners
+  settingsBtn.addEventListener('click', () => {
+    settingsPanel.classList.remove('hidden');
+    loadSettings();
+  });
+
+  closeSettingsBtn.addEventListener('click', () => {
+    settingsPanel.classList.add('hidden');
+  });
+
+  saveSettingsBtn.addEventListener('click', saveSettings);
+  resetSettingsBtn.addEventListener('click', resetSettings);
+
+  // Load settings on init
+  loadSettings();
 
   // ETA Calculation
   const timeSamples = [];
@@ -209,10 +341,12 @@ document.addEventListener('DOMContentLoaded', () => {
     toggleProgress(true);
     hideError();
     showStatus('Đang khởi động crawl...', 'processing');
-    addLog('>>> Bắt đầu crawl tất cả đơn...', 'info');
+    const orderLimitInput = document.getElementById('orderLimitInput');
+    const orderLimit = Math.max(1, parseInt(orderLimitInput?.value || '99999', 10) || 99999);
+    addLog('>>> Bắt đầu crawl tối đa ' + orderLimit + ' đơn...', 'info');
 
     try {
-      const response = await chrome.runtime.sendMessage({ type: 'START_CRAWL' });
+      const response = await chrome.runtime.sendMessage({ type: 'START_CRAWL', orderLimit });
 
       if (response?.success) {
         showStatus('Hoàn thành crawl ' + response.count + ' đơn', 'success');

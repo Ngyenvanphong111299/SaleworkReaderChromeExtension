@@ -126,7 +126,7 @@ function fillAndSearchAndClick(phoneNumber) {
         const messages = extractMessages();
         chrome.runtime.sendMessage({ type: 'CONTENT_LOG', text: '[Conv ' + (conversationIndex + 1) + '] Trich xuat duoc ' + messages.length + ' tin nhan', logType: messages.length > 0 ? 'success' : 'warn' });
 
-        const messagesWithStaff = messages.map(msg => ({ ...msg, staffName: staffName }));
+        const messagesWithStaff = messages.map((msg, idx) => ({ ...msg, staffName: staffName, order: idx }));
         conversations.push({ staffName, messages: messagesWithStaff });
 
         conversationIndex++;

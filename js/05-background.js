@@ -2,9 +2,15 @@
 
 import { logToPopup } from './02-utils.js';
 import { getCrawlState, stopCrawl, startCrawl, skipCurrentOrder } from './04-crawl.js';
-import { API_BASE, ENV_CONFIG } from './01-config.js';
+import { getConfig, refreshConfig, getApiBase, ENV_CONFIG } from './01-config.js';
+import { initSettings } from './00-settings.js';
 
-logToPopup('Background script v2.1 đã tải. ENV: ' + ENV_CONFIG.mode, 'info');
+// Init settings trước khi sử dụng
+initSettings().then((settings) => {
+  logToPopup('Background script v2.1 đã tải. API: ' + settings.apiBaseUrl, 'info');
+});
+
+logToPopup('Background script v2.1 đang khởi tạo...', 'info');
 
 // Rate Limiting
 const RATE_LIMIT = {
@@ -60,8 +66,9 @@ chrome.action.onClicked.addListener(async (tab) => {
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'START_CRAWL') {
-    logToPopup('[MSG] Bắt đầu crawl', 'info');
-    startCrawl().then((result) => {
+    const orderLimit = message.orderLimit ?? 99999;
+    logToPopup('[MSG] Bắt đầu crawl (tối đa ' + orderLimit + ' đơn)', 'info');
+    startCrawl(orderLimit).then((result) => {
       sendResponse(result);
     });
     return true;

@@ -1,34 +1,87 @@
 // Step 01: Cấu hình extension - hằng số dùng chung
+// Import settings từ 00-settings.js
+import { getSettings, getApiBaseUrlSync, DEFAULT_SETTINGS } from './00-settings.js';
 
-// ============ ENVIRONMENT CONFIG ============
+// ============ DYNAMIC CONFIG ============
+// Config động, lấy từ chrome.storage
+
+let cachedSettings = null;
+
+/**
+ * Lấy settings (cache để tránh gọi storage nhiều lần)
+ * @returns {Promise<Object>}
+ */
+export async function getConfig() {
+  if (!cachedSettings) {
+    cachedSettings = await getSettings();
+  }
+  return cachedSettings;
+}
+
+/**
+ * Refresh settings từ storage
+ * @returns {Promise<Object>}
+ */
+export async function refreshConfig() {
+  cachedSettings = await getSettings();
+  return cachedSettings;
+}
+
+/**
+ * API Base URL - async để lấy từ settings
+ * @returns {Promise<string>}
+ */
+export async function getApiBase() {
+  const config = await getConfig();
+  return config.apiBaseUrl || DEFAULT_SETTINGS.apiBaseUrl;
+}
+
+/**
+ * Log level từ settings
+ * @returns {Promise<string>}
+ */
+export async function getLogLevel() {
+  const config = await getConfig();
+  return config.logLevel || 'info';
+}
+
+// Legacy support - sử dụng default (sẽ được override bởi settings khi init)
+export let API_BASE = getApiBaseUrlSync();
+
+// ============ ENVIRONMENT CONFIG (Fallback) ============
+// Giữ lại để backward compatibility
 export const ENV_CONFIG = {
-  // Chế độ: 'development' hoặc 'production'
-  mode: 'development',
+  mode: 'production',
 
-  // Development settings
   development: {
     apiBase: 'http://localhost:5153/api/v1',
     logLevel: 'debug'
   },
 
-  // Production settings
   production: {
-    // TODO: Thay bằng production API URL khi deploy
-    apiBase: 'https://api.yourdomain.com/api/v1',
+    apiBase: 'https://omnichannel.hoangkimeco.com/api/v1',
     logLevel: 'info'
   },
 
+  // Sync version - dùng khi cần API ngay mà không async
+  getApiBaseSync() {
+    return this.production.apiBase;
+  },
+
   getApiBase() {
-    return this[this.mode].apiBase;
+    return this.production.apiBase;
   },
 
   getLogLevel() {
-    return this[this.mode].logLevel;
+    return this.production.logLevel;
   }
 };
 
-// Legacy support - sử dụng getApiBase()
-export const API_BASE = ENV_CONFIG.getApiBase();
+// Update API_BASE khi settings load xong
+getConfig().then((settings) => {
+  API_BASE = settings.apiBaseUrl;
+  console.log('Config: API Base set to', API_BASE);
+});
 
 // ============ VALIDATION UTILITIES ============
 
@@ -119,7 +172,7 @@ export function escapeHtml(text) {
 export const TIMING = {
   SALEWORK_LOAD: 3000,
   SCRIPT_INJECT_DELAY: 1000,
-  PROCESS_WAIT: 15000,
+  PROCESS_WAIT: 600000, // 10 phút - scroll + extract toàn bộ tin nhắn
   BETWEEN_ORDERS: 2000,
   SEARCH_RESULT_WAIT: 6000,
   CONVERSATION_LOAD: 3000,
