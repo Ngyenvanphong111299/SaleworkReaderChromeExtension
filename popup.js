@@ -202,6 +202,57 @@ document.addEventListener('DOMContentLoaded', () => {
     if (apiDataCard) apiDataCard.classList.remove('show');
   }
 
+  // ============ AAC FILES CAUGHT ============
+  async function refreshAacList() {
+    const aacList = document.getElementById('aacList');
+    if (!aacList) return;
+    try {
+      const res = await chrome.runtime.sendMessage({ type: 'GET_CAPTURED_AAC_URLS' });
+      const urls = res?.urls || [];
+      aacList.innerHTML = '';
+      if (urls.length === 0) {
+        const empty = document.createElement('span');
+        empty.className = 'aac-empty';
+        empty.textContent = 'Chưa có file .aac (click play tin nhắn thoại trên Salework)';
+        aacList.appendChild(empty);
+      } else {
+        urls.forEach((url, i) => {
+          const div = document.createElement('div');
+          div.className = 'aac-item';
+          const a = document.createElement('a');
+          a.href = url;
+          a.target = '_blank';
+          a.rel = 'noopener';
+          a.textContent = url;
+          div.appendChild(document.createTextNode((i + 1) + '. '));
+          div.appendChild(a);
+          aacList.appendChild(div);
+        });
+      }
+    } catch (e) {
+      aacList.innerHTML = '';
+      const err = document.createElement('span');
+      err.className = 'aac-empty';
+      err.textContent = 'Lỗi: ' + e.message;
+      aacList.appendChild(err);
+    }
+  }
+
+  document.getElementById('aacRefreshBtn')?.addEventListener('click', refreshAacList);
+  document.getElementById('aacClearBtn')?.addEventListener('click', async () => {
+    await chrome.runtime.sendMessage({ type: 'CLEAR_CAPTURED_AAC_URLS' });
+    refreshAacList();
+    addLog('Đã xóa danh sách file .aac', 'info');
+  });
+
+  refreshAacList();
+
+  // Giữ service worker sống khi popup mở (để webRequest bắt .aac)
+  const aacKeepAlive = setInterval(() => {
+    chrome.runtime.sendMessage({ type: 'GET_CAPTURED_AAC_URLS' }).then(refreshAacList).catch(() => {});
+  }, 4000);
+  window.addEventListener('unload', () => clearInterval(aacKeepAlive));
+
   // Clear log
   document.getElementById('clearLogBtn').addEventListener('click', () => {
     logList.innerHTML = '';
@@ -296,22 +347,22 @@ document.addEventListener('DOMContentLoaded', () => {
   const manualSearchInput = document.getElementById('manualSearchInput');
   const manualSearchBtn = document.getElementById('manualSearchBtn');
   const manualPhoneInput = document.getElementById('manualPhoneInput');
+  const manualMaxConvsInput = document.getElementById('manualMaxConvsInput');
 
   manualSearchToggle?.addEventListener('click', () => {
     manualSearchInput?.classList.toggle('hidden');
   });
 
   manualSearchBtn?.addEventListener('click', async () => {
-    let phone = manualPhoneInput?.value?.trim();
-    if (!phone) {
-      addLog('Vui lòng nhập số điện thoại!', 'warn');
+    const searchText = manualPhoneInput?.value?.trim();
+    if (!searchText) {
+      addLog('Vui lòng nhập SDT hoặc tên để tìm kiếm!', 'warn');
       return;
     }
 
-    phone = phone.replace(/\D/g, '');
-    if (phone.startsWith('84')) phone = '0' + phone.substring(2);
+    const maxConvs = parseInt(manualMaxConvsInput?.value || '0', 10) || 0;
 
-    addLog('>>> Manual search: ' + phone, 'info');
+    addLog('>>> Manual search: ' + searchText + (maxConvs > 0 ? ' (tối đa ' + maxConvs + ' hội thoại)' : ''), 'info');
 
     try {
       const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -336,12 +387,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
       await new Promise(r => setTimeout(r, 1000));
 
-      addLog('Đang search SDT: ' + phone, 'info');
+      addLog('Đang search: ' + searchText, 'info');
 
       try {
         const response = await chrome.tabs.sendMessage(tabId, {
           type: 'FILL_AND_SEARCH',
-          phoneNumber: phone
+          phoneNumber: searchText,
+          maxConversations: maxConvs > 0 ? maxConvs : undefined
         });
 
         addLog('Phản hồi: ' + (response?.success ? 'OK' : (response?.error || 'Lỗi')), response?.success ? 'success' : 'warn');
@@ -350,7 +402,7 @@ document.addEventListener('DOMContentLoaded', () => {
           const convs = response.conversations || [];
           const totalMsg = convs.reduce((s, c) => s + (c.messages?.length || 0), 0);
           addLog('Hoàn thành! ' + totalMsg + ' tin nhắn, ' + convs.length + ' hội thoại', 'success');
-          showApiDataPreview(phone, convs);
+          showApiDataPreview(searchText, convs);
 
           // Gọi preview API để test (không lưu DB)
           try {
@@ -358,7 +410,7 @@ document.addEventListener('DOMContentLoaded', () => {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
-                phoneNumber: phone,
+                phoneNumber: searchText,
                 conversations: convs,
                 replaceExisting: true
               })

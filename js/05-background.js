@@ -124,7 +124,31 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     } else {
       logToPopup('Content: Trich xuat ' + (message.messages?.length || 0) + ' tin nhan', 'info');
     }
+  } else if (message.type === 'GET_CAPTURED_AAC_URLS') {
+    sendResponse({ urls: [...capturedAacUrls] });
+  } else if (message.type === 'CLEAR_CAPTURED_AAC_URLS') {
+    capturedAacUrls.length = 0;
+    sendResponse({ ok: true });
   }
+  return true;
 });
+
+// Lưu tất cả URL *.aac đã bắt được (khi user click play trên Salework)
+const capturedAacUrls = [];
+
+chrome.webRequest.onBeforeRequest.addListener(
+  (details) => {
+    const url = details.url || '';
+    if (!/\.aac$/i.test(url) || !url.includes('zdn.vn')) return;
+    if (!capturedAacUrls.includes(url)) {
+      capturedAacUrls.push(url);
+      logToPopup('Bắt được .aac: ' + url.slice(-30), 'success');
+    }
+    if (details.tabId > 0) {
+      chrome.tabs.sendMessage(details.tabId, { type: 'AUDIO_URL_CAPTURED', url }).catch(() => {});
+    }
+  },
+  { urls: ['<all_urls>'] }
+);
 
 logToPopup('Background script sẵn sàng', 'info');

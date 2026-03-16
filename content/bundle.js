@@ -362,18 +362,50 @@ function extractMessageData(container, index) {
 
   if (textEl) content = textEl.textContent.trim();
 
-  // Images - hỗ trợ cấu trúc mới: .photo-container, .group-img-container, .el-image
+  // Cuộc gọi - img[src*="call-incoming"] hoặc call-outgoing
+  let callType = null;
+  let callContent = null;
+  const callIcon = container.querySelector('img[src*="call-incoming"], img[src*="call-outgoing"]');
+  if (callIcon) {
+    callType = (callIcon.src || callIcon.getAttribute('src') || '').includes('call-incoming') ? 'incoming' : 'outgoing';
+    const callBlock = callIcon.closest('.rounded-top-9') || callIcon.closest('.d-flex.align-items-start')?.parentElement;
+    if (callBlock) {
+      let raw = callBlock.textContent?.trim().replace(/\s+/g, ' ') || null;
+      if (raw) callContent = raw.replace(/(đến|đi)(\d)/g, '$1 $2');
+    }
+  }
+
+  // Audio - sound-bar (tin nhắn thoại)
+  const soundBar = container.querySelector('.sound-bar-1, .sound-bar-2, .sound-bar-3, [class*="sound-bar"]');
+  const isAudio = !!soundBar;
+  if (isAudio) {
+    const durationEl = container.querySelector('[class*="duration"], .el-tooltip');
+    const d = durationEl ? durationEl.textContent?.trim().replace(/\s+/g, ' ') : '';
+    if (!content) content = '[Tin nhắn thoại]' + (d ? ' ' + d : '');
+  }
+
+  // Video - video > source[src] hoặc video[src], poster = thumbnail
+  let videoUrl = null;
+  let posterUrl = null;
+  const videoEl = container.querySelector('video');
+  if (videoEl) {
+    const sourceEl = videoEl.querySelector('source');
+    videoUrl = (sourceEl?.src || sourceEl?.getAttribute('src') || videoEl.src || videoEl.getAttribute('src'))?.trim();
+    posterUrl = (videoEl.poster || videoEl.getAttribute('poster'))?.trim();
+  }
+
+  // Images - bỏ qua nếu đã có video (tránh lấy poster làm ảnh)
   const imageUrls = [];
   const isMultiImage = container.querySelector('.group-img-container') !== null;
 
-  if (isMultiImage) {
+  if (!videoUrl && isMultiImage) {
     container.querySelectorAll('.group-img-container img').forEach(img => {
       const src = img.src || img.getAttribute('src');
       if (src && !isUiIcon(src)) imageUrls.push(src);
     });
   }
 
-  if (imageUrls.length === 0) {
+  if (!videoUrl && imageUrls.length === 0) {
     // Tin nhắn 1 ảnh: .photo-container > .el-image > img
     container.querySelectorAll('.photo-container img').forEach(img => {
       const src = img.src || img.getAttribute('src');
@@ -381,37 +413,51 @@ function extractMessageData(container, index) {
     });
   }
 
-  if (imageUrls.length === 0) {
+  if (!videoUrl && imageUrls.length === 0) {
     container.querySelectorAll('.el-image img').forEach(img => {
       const src = img.src || img.getAttribute('src');
       if (src && !isUiIcon(src)) imageUrls.push(src);
     });
   }
 
-  if (imageUrls.length === 0) {
+  if (!videoUrl && imageUrls.length === 0) {
     container.querySelectorAll('img[src*="zdn.vn"]').forEach(img => {
       const src = img.src || img.getAttribute('src');
       if (src && !isUiIcon(src)) imageUrls.push(src);
     });
   }
 
-  // imageUrl cho backend (1 ảnh = string, nhiều ảnh = JSON string)
+  // imageUrl cho backend (1 ảnh = string, nhiều ảnh = JSON string). Video dùng imageUrl để tương thích AttachmentUrl
   let imageUrl = null;
-  if (imageUrls.length === 1) imageUrl = imageUrls[0];
-  else if (imageUrls.length > 1) imageUrl = JSON.stringify(imageUrls);
+  if (videoUrl) {
+    imageUrl = videoUrl;
+    if (!content) content = '[Video]';
+  } else if (imageUrls.length === 1) {
+    imageUrl = imageUrls[0];
+  } else if (imageUrls.length > 1) {
+    imageUrl = JSON.stringify(imageUrls);
+  }
 
-  if (imageUrl && !content) content = '[Hình ảnh]';
+  const firstImg = imageUrls[0] || imageUrl;
+  if (imageUrl && !content) content = isStickerUrl(firstImg) ? '[Sticker]' : '[Hình ảnh]';
+  if (callContent) content = callContent;
+
+  const finalMessageType = callContent ? 'call' : (isAudio ? 'audio' : (videoUrl ? 'video' : (imageUrl ? (isStickerUrl(firstImg) ? 'sticker' : 'image') : 'text')));
 
   return {
     id: msgId,
     content: content,
     time: time,
     type: msgType,
-    messageType: imageUrl ? 'image' : 'text',
+    messageType: finalMessageType,
     quotedContent: quotedContent || null,
     quotedSender: quotedSender || null,
     images: imageUrls.length > 0 ? imageUrls : null,
-    imageUrl: imageUrl || undefined
+    imageUrl: imageUrl || undefined,
+    videoUrl: videoUrl || undefined,
+    posterUrl: posterUrl || undefined,
+    callType: callType || undefined,
+    ...(isAudio ? { audioUrl: undefined } : {})
   };
 }
 
@@ -445,8 +491,11 @@ function cleanupOldMessages(keepCount = 100) {
 // Biến lưu tất cả tin nhắn đã extract
 let allExtractedMessages = [];
 
+// Biến global: mỗi khi nhận .aac từ background thì push vào đây
+let capturedAacUrls = [];
+
 async function scrollUpToLoadMessages() {
-  // Reset biến khi bắt đầu scroll mới
+  // Reset biến khi bắt đầu scroll mới (không clear capturedAacUrls - đã capture khi conversation load trước scroll)
   allExtractedMessages = [];
 
   await waitForCondition(
@@ -564,12 +613,36 @@ async function scrollUpToLoadMessages() {
     }
   }
 
+  // Phân phối URL .aac vào tin nhắn audio (đồng bộ từ background trước - phòng message không tới content)
+  await syncAacUrlsFromBackground();
+  enrichMessagesWithAudioUrls();
+
   if (chrome.runtime) {
     chrome.runtime.sendMessage({
       type: 'CONTENT_LOG',
       text: 'Scroll xong: ' + allExtractedMessages.length + ' tin nhan',
       logType: 'info'
     });
+  }
+}
+
+async function syncAacUrlsFromBackground() {
+  try {
+    const res = await chrome.runtime.sendMessage({ type: 'GET_CAPTURED_AAC_URLS' });
+    const urls = res?.urls || [];
+    if (urls.length > 0) {
+      capturedAacUrls.length = 0;
+      capturedAacUrls.push(...urls);
+    }
+  } catch (_) {}
+}
+
+function enrichMessagesWithAudioUrls() {
+  let audioIdx = 0;
+  for (const msg of allExtractedMessages) {
+    if (msg.messageType === 'audio' && audioIdx < capturedAacUrls.length) {
+      msg.audioUrl = capturedAacUrls[audioIdx++];
+    }
   }
 }
 
@@ -581,7 +654,13 @@ const UI_ICON_PATTERNS = ['emoji', 'icon', 'three_dots', 'assets/images'];
 
 function isUiIcon(src) {
   if (!src || typeof src !== 'string') return true;
+  if (src.includes('emoticon') || src.includes('sticker')) return false;
   return UI_ICON_PATTERNS.some(p => src.includes(p));
+}
+
+function isStickerUrl(src) {
+  if (!src || typeof src !== 'string') return false;
+  return /emoticon|sticker/i.test(src);
 }
 
 function parseDateFromTimestamp(timestampStr) {
@@ -654,11 +733,32 @@ function extractMessages() {
 
       if (textEl) content = textEl.textContent.trim();
 
+      // Cuộc gọi
+      let callContent = null;
+      let callType = null;
+      const callIcon = container.querySelector('img[src*="call-incoming"], img[src*="call-outgoing"]');
+      if (callIcon) {
+        callType = (callIcon.src || callIcon.getAttribute('src') || '').includes('call-incoming') ? 'incoming' : 'outgoing';
+        const callBlock = callIcon.closest('.rounded-top-9') || callIcon.closest('.d-flex.align-items-start')?.parentElement;
+        if (callBlock) {
+          let raw = callBlock.textContent?.trim().replace(/\s+/g, ' ') || null;
+          if (raw) callContent = raw.replace(/(đến|đi)(\d)/g, '$1 $2');
+        }
+      }
+
+      // Video
+      let videoUrl = '';
+      const videoEl = container.querySelector('video');
+      if (videoEl) {
+        const sourceEl = videoEl.querySelector('source');
+        videoUrl = (sourceEl?.src || sourceEl?.getAttribute('src') || videoEl.src || videoEl.getAttribute('src'))?.trim() || '';
+      }
+
       // Images
       const imageUrls = [];
       const isMultiImage = container.querySelector('.group-img-container') !== null;
 
-      if (isMultiImage) {
+      if (!videoUrl && isMultiImage) {
         const imgs = container.querySelectorAll('.group-img-container img');
         imgs.forEach(img => {
           const src = img.src || img.getAttribute('src');
@@ -666,7 +766,7 @@ function extractMessages() {
         });
       }
 
-      if (imageUrls.length === 0) {
+      if (!videoUrl && imageUrls.length === 0) {
         const photoContainer = container.querySelector('.photo-container');
         if (photoContainer) {
           const imgSelectors = ['img.el-image__preview', 'img.el-image__inner', 'img[src]'];
@@ -682,14 +782,14 @@ function extractMessages() {
           }
         }
       }
-      if (imageUrls.length === 0) {
+      if (!videoUrl && imageUrls.length === 0) {
         const elImage = container.querySelector('.el-image img');
         if (elImage) {
           const src = elImage.src || elImage.getAttribute('src');
           if (src && !isUiIcon(src)) imageUrls.push(src);
         }
       }
-      if (imageUrls.length === 0) {
+      if (!videoUrl && imageUrls.length === 0) {
         const allImages = container.querySelectorAll('img');
         for (const img of allImages) {
           const src = img.src || img.getAttribute('src');
@@ -701,22 +801,33 @@ function extractMessages() {
       }
 
       let imageUrl = '';
-      if (imageUrls.length === 1) {
+      if (videoUrl) {
+        imageUrl = videoUrl;
+        if (!content) content = '[Video]';
+      } else if (imageUrls.length === 1) {
         imageUrl = imageUrls[0];
       } else if (imageUrls.length > 1) {
         imageUrl = JSON.stringify(imageUrls);
       }
 
-      if (imageUrl && !content) content = '[Hình ảnh]';
+      const firstImg = imageUrls[0] || imageUrl;
+      if (imageUrl && !content) content = isStickerUrl(firstImg) ? '[Sticker]' : '[Hình ảnh]';
+      if (callContent) content = callContent;
+
+      const finalMessageType = callContent ? 'call' : (videoUrl ? 'video' : (imageUrl ? (isStickerUrl(firstImg) ? 'sticker' : 'image') : 'text'));
 
       if (content || imageUrl) {
+        const posterUrl = videoEl ? (videoEl.poster || videoEl.getAttribute('poster'))?.trim() : null;
         messages.push({
           id: msgId,
           content: content,
           time: time,
           type: msgType,
-          messageType: imageUrl ? 'image' : 'text',
+          messageType: finalMessageType,
           imageUrl: imageUrl || undefined,
+          videoUrl: videoUrl || undefined,
+          posterUrl: posterUrl || undefined,
+          callType: callType || undefined,
           quotedContent: quotedContent,
           quotedSender: quotedSender
         });
@@ -743,7 +854,7 @@ function extractAllMessagesFromDOM(containers) {
   containers.forEach((container, index) => {
     try {
       const msgData = extractMessageData(container, index);
-      if (msgData.content || msgData.images || msgData.imageUrl) {
+      if (msgData.content || msgData.images || msgData.imageUrl || msgData.messageType === 'audio') {
         messages.push(msgData);
       }
     } catch (e) {
@@ -848,8 +959,8 @@ async function getStaffNameFromAvatarTooltip(convElement) {
   return staffName;
 }
 
-function fillAndSearchAndClick(phoneNumber) {
-  console.log('[FILL_SEARCH] Starting for:', phoneNumber);
+function fillAndSearchAndClick(phoneNumber, maxConversations) {
+  console.log('[FILL_SEARCH] Starting for:', phoneNumber, maxConversations ? '(max ' + maxConversations + ' convs)' : '');
   return new Promise(function (resolve) {
     let currentRetry = 0;
 
@@ -897,17 +1008,24 @@ function fillAndSearchAndClick(phoneNumber) {
         return;
       }
 
+      const convsToProcess = (maxConversations && maxConversations > 0)
+        ? allConvs.slice(0, maxConversations)
+        : allConvs;
+      console.log('[FILL_SEARCH] Processing', convsToProcess.length, 'of', allConvs.length, 'conversations');
+
       const conversations = [];
 
-      for (let convIdx = 0; convIdx < allConvs.length; convIdx++) {
-        const conv = allConvs[convIdx];
+      for (let convIdx = 0; convIdx < convsToProcess.length; convIdx++) {
+        const conv = convsToProcess[convIdx];
         // Scroll conv vào view trước khi lấy tên - tooltip cần element visible để render
         conv.scrollIntoView({ block: 'center', behavior: 'instant' });
         await new Promise(r => setTimeout(r, 300));
         const staffName = (await getStaffNameFromAvatarTooltip(conv)) || 'Conv ' + (convIdx + 1);
         let userName = getUserNameFromConversation(conv);
 
-        const clickResult = await clickConversation(conv, convIdx, allConvs.length);
+        capturedAacUrls = [];
+        try { await chrome.runtime.sendMessage({ type: 'CLEAR_CAPTURED_AAC_URLS' }); } catch (_) {}
+        const clickResult = await clickConversation(conv, convIdx, convsToProcess.length);
         if (clickResult && clickResult.rateLimit) {
           resolve({ success: false, rateLimit: true, error: 'Rate limit - khong co tin nhan sau khi click' });
           return;
@@ -925,13 +1043,13 @@ function fillAndSearchAndClick(phoneNumber) {
         const messagesWithStaff = messages.map((msg, idx) => ({ ...msg, staffName: staffName, order: idx }));
         conversations.push({ staffName, userName: userName || undefined, messages: messagesWithStaff });
 
-        if (convIdx < allConvs.length - 1) {
+        if (convIdx < convsToProcess.length - 1) {
           await new Promise(r => setTimeout(r, BETWEEN_CONV_MS));
         }
       }
 
       window.__extractedPhone = phoneNumber;
-      resolve({ success: true, conversations, conversationsCount: allConvs.length });
+      resolve({ success: true, conversations, conversationsCount: convsToProcess.length });
     }
 
     retrySearch();
@@ -940,13 +1058,18 @@ function fillAndSearchAndClick(phoneNumber) {
 
 // ============ MESSAGE LISTENER ============
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.type === 'AUDIO_URL_CAPTURED' && message.url) {
+    capturedAacUrls.push(message.url);
+    return;
+  }
+
   if (message.type === 'FILL_PHONE') {
     const success = fillPhoneNumber(message.phoneNumber);
     sendResponse({ success: success });
   }
 
   if (message.type === 'FILL_AND_SEARCH') {
-    fillAndSearchAndClick(message.phoneNumber).then(function (result) {
+    fillAndSearchAndClick(message.phoneNumber, message.maxConversations).then(function (result) {
       sendResponse(result);
     });
     return true;

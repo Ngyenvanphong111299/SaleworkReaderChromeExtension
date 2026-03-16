@@ -9,11 +9,14 @@
     "tabs",
     "scripting",
     "alarms",
-    "sidePanel"
+    "sidePanel",
+    "webRequest"
   ],
   "host_permissions": [
     "*://*.salework.net/*",
-    "http://localhost:5153/*"
+    "http://localhost:5153/*",
+    "*://*.zdn.vn/*",
+    "<all_urls>"
   ],
   "background": {
     "service_worker": "js/05-background.js",
