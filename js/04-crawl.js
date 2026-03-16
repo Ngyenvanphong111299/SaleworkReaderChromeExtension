@@ -71,19 +71,43 @@ function waitForTabLoad(tabId, timeoutMs = 60000) {
   });
 }
 
+/**
+ * Đưa tab Salework lên foreground - tránh trường hợp Chrome minimize/background
+ * khiến Salework không render chat container (bị nhầm là rate limit)
+ */
+async function ensureSaleworkTabVisible(tabId) {
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    await chrome.tabs.update(tabId, { active: true });
+    if (tab.windowId) {
+      await chrome.windows.update(tab.windowId, { focused: true });
+    }
+    await new Promise(r => setTimeout(r, 500));
+  } catch (e) {
+    logToPopup('[FOCUS] Khong the dua tab len: ' + e.message, 'warn');
+  }
+}
+
 export async function processPhone(phoneNumber, rateLimitRetryCount = 0) {
   logToPopup('=== Bắt đầu xử lý SDT: ' + phoneNumber + ' ===', 'info');
 
   try {
-    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+    // Tìm tab Salework (ưu tiên tab đang active, fallback: bất kỳ tab salework.net)
+    let tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tabs[0] || !tabs[0].url?.includes('salework.net')) {
+      tabs = await chrome.tabs.query({ url: '*://*.salework.net/*' });
+    }
 
     if (!tabs[0]) {
-      logToPopup('Khong tim thay tab!', 'error');
+      logToPopup('Khong tim thay tab Salework!', 'error');
       return null;
     }
 
     const tabId = tabs[0].id;
     const tabUrl = tabs[0].url || '';
+
+    // Đưa tab lên foreground trước khi crawl - Salework cần visible để render chat
+    await ensureSaleworkTabVisible(tabId);
 
     if (!tabUrl.includes('salework.net')) {
       logToPopup('Dang chuyen den Salework...', 'info');
@@ -118,6 +142,9 @@ export async function processPhone(phoneNumber, rateLimitRetryCount = 0) {
     }
 
     await new Promise(r => setTimeout(r, TIMING.SCRIPT_INJECT_DELAY));
+
+    // Đảm bảo tab vẫn visible trước khi fill/search (tránh user đổi tab giữa chừng)
+    await ensureSaleworkTabVisible(tabId);
 
     logToPopup('Dien SDT: ' + phoneNumber + ' va tim kiem...', 'info');
 
