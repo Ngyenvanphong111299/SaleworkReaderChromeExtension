@@ -5,6 +5,8 @@ function logToUI(text, logType) {
 }
 
 var CONV_LOAD_MS = 3000;
+var RATE_LIMIT_WAIT_MS = 30000;
+var RATE_LIMIT_CHECK_INTERVAL_MS = 1000;
 
 // DOM Cache
 const domCache = {
@@ -143,6 +145,13 @@ function findAllConversations() {
   return result;
 }
 
+function getMessageCountForRateLimit() {
+  let c = document.querySelectorAll('.z2-message-container');
+  if (c.length === 0) c = document.querySelectorAll('[class*="message-container"]');
+  if (c.length === 0) c = document.querySelectorAll('div[class*="z2-message"]');
+  return c.length;
+}
+
 async function clickConversation(conv, index, total) {
   const msg = 'Click vao conversation ' + (index + 1) + '/' + total + '...';
   console.log('>>> [CLICK_CONV] ' + msg);
@@ -150,18 +159,27 @@ async function clickConversation(conv, index, total) {
 
   conv.click();
 
-  // Thay vì cố định 3s, dùng dynamic waiting
-  await waitForCondition(
-    () => {
-      // Kiểm tra conversation đã load chưa
-      const msgContainer = document.querySelector('.z2-message-container, [class*="message-container"]');
-      return msgContainer !== null;
-    },
-    8000 // 8s timeout
+  // Poll mỗi 1s, tối đa 30s - nếu không có message = rate limit
+  const hasMessage = await waitForCondition(
+    () => getMessageCountForRateLimit() >= 1,
+    RATE_LIMIT_WAIT_MS,
+    RATE_LIMIT_CHECK_INTERVAL_MS,
+    RATE_LIMIT_CHECK_INTERVAL_MS
   );
 
-  console.log('>>> [CLICK_CONV] ✓ Đã load conversation');
+  if (!hasMessage) {
+    console.log('>>> [CLICK_CONV] Rate limit: Khong co tin nhan sau ' + (RATE_LIMIT_WAIT_MS / 1000) + 's');
+    chrome.runtime.sendMessage({
+      type: 'CONTENT_LOG',
+      text: 'Rate limit: Khong co tin nhan sau ' + (RATE_LIMIT_WAIT_MS / 1000) + 's - Reload trang va thu lai...',
+      logType: 'warn'
+    });
+    return { rateLimit: true };
+  }
+
+  console.log('>>> [CLICK_CONV] ✓ Đã load conversation (có tin nhắn)');
   chrome.runtime.sendMessage({ type: 'CONTENT_LOG', text: 'Da load conversation ' + (index + 1), logType: 'info' });
+  return { success: true };
 }
 
 // Export

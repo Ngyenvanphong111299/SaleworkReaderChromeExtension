@@ -117,7 +117,12 @@ function fillAndSearchAndClick(phoneNumber) {
       for (const conv of allConvs) {
         const staffName = (await getStaffNameFromAvatarTooltip(conv)) || 'Conv ' + (conversationIndex + 1);
 
-        await clickConversation(conv, conversationIndex, allConvs.length);
+        const clickResult = await clickConversation(conv, conversationIndex, allConvs.length);
+        if (clickResult && clickResult.rateLimit) {
+          chrome.runtime.sendMessage({ type: 'CONTENT_LOG', text: 'Rate limit - khong co tin nhan sau khi click', logType: 'error' });
+          resolve({ success: false, rateLimit: true, error: 'Rate limit - khong co tin nhan sau khi click' });
+          return;
+        }
 
         chrome.runtime.sendMessage({ type: 'CONTENT_LOG', text: '[Conv ' + (conversationIndex + 1) + '/' + allConvs.length + '] Scroll load tin nhan...', logType: 'info' });
         await scrollUpToLoadMessages();

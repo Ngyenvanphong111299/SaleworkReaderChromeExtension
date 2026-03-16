@@ -3,7 +3,7 @@
 // ============ ENVIRONMENT CONFIG ============
 export const ENV_CONFIG = {
   // Chế độ: 'development' hoặc 'production'
-  mode: 'production',
+  mode: 'development',
 
   // Development settings
   development: {
@@ -137,6 +137,11 @@ export const TIMING = {
   RETRY_DELAY: 1000,
   MAX_RETRIES: 5,
   EXTRACT_DELAY: 2000,
+
+  // Rate limit detection - poll mỗi 1s, tối đa 30s
+  RATE_LIMIT_CHECK_INTERVAL_MS: 1000,
+  RATE_LIMIT_WAIT_MS: 30000,
+  RATE_LIMIT_RETRY_MAX: 3,
 
   // Dynamic waiting config
   DYNAMIC_MIN_INTERVAL: 300,     // Tối thiểu 300ms giữa các lần check

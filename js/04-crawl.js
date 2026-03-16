@@ -51,7 +51,27 @@ function sendMessageWithTimeout(tabId, message, timeoutMs = 30000) {
   });
 }
 
-export async function processPhone(phoneNumber) {
+/**
+ * Chờ tab load xong sau khi reload
+ */
+function waitForTabLoad(tabId, timeoutMs = 60000) {
+  return new Promise((resolve) => {
+    const listener = (updatedTabId, changeInfo) => {
+      if (updatedTabId === tabId && changeInfo.status === 'complete') {
+        chrome.tabs.onUpdated.removeListener(listener);
+        clearTimeout(timeoutId);
+        resolve();
+      }
+    };
+    chrome.tabs.onUpdated.addListener(listener);
+    const timeoutId = setTimeout(() => {
+      chrome.tabs.onUpdated.removeListener(listener);
+      resolve();
+    }, timeoutMs);
+  });
+}
+
+export async function processPhone(phoneNumber, rateLimitRetryCount = 0) {
   logToPopup('=== Bắt đầu xử lý SDT: ' + phoneNumber + ' ===', 'info');
 
   try {
@@ -116,6 +136,23 @@ export async function processPhone(phoneNumber) {
 
     if (result.error) {
       logToPopup('Loi: ' + result.error, 'error');
+    }
+
+    // Rate limit: reload trang và thử lại từ đầu
+    if (result?.rateLimit) {
+      const maxRetry = TIMING.RATE_LIMIT_RETRY_MAX ?? 3;
+      if (rateLimitRetryCount >= maxRetry) {
+        logToPopup('Rate limit: Da thu lai ' + maxRetry + ' lan, bo qua SDT nay', 'error');
+        return null;
+      }
+
+      logToPopup('Rate limit phat hien! Reload trang va thu lai (lan ' + (rateLimitRetryCount + 1) + '/' + maxRetry + ')...', 'warn');
+      const loadPromise = waitForTabLoad(tabId);
+      await chrome.tabs.reload(tabId);
+      await loadPromise;
+      await new Promise(r => setTimeout(r, TIMING.SALEWORK_LOAD));
+
+      return processPhone(phoneNumber, rateLimitRetryCount + 1);
     }
 
     const conversations = result?.conversations || [];
@@ -199,7 +236,17 @@ export async function startCrawl(orderLimit = 99999) {
       totalMessages += messageCount;
 
       const orderId = order.id || order.Id;
-      await markOrderAsCrawled(orderId, messageCount);
+
+      // Chỉ đánh dấu crawled trong 2 trường hợp:
+      // 1. Thành công: đã crawl đầy đủ tin nhắn (conversations.length > 0)
+      // 2. Search phone nhưng không có conversation nào (conversations.length === 0, processResult != null)
+      // Không đánh dấu khi processResult = null (lỗi, rate limit, inject fail...)
+      const shouldMarkCrawled = processResult != null;
+      if (shouldMarkCrawled) {
+        await markOrderAsCrawled(orderId, messageCount);
+      } else {
+        logToPopup('Crawl that bai - KHONG danh dau don da crawl, se thu lai sau', 'warn');
+      }
 
       if (conversations.length > 0) {
         const saved = await saveMessages(phoneNumber, conversations);

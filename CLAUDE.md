@@ -46,7 +46,8 @@ Cần chạy API server tại `http://localhost:5153` với các endpoints:
 
 ## Key Behaviors
 
-- **Auto Crawl**: Lấy N đơn từ API, tuần tự crawl từng số điện thoại với delay 15s mỗi đơn
+- **Rate Limit Detection**: Sau khi click conversation, poll mỗi 1s để kiểm tra có ít nhất 1 tin nhắn. Tối đa 30s → không có → rate limit → reload trang và thử lại (tối đa 3 lần).
+- **Auto Crawl**: Lấy N đơn từ API, tuần tự crawl từng số điện thoại với delay 2s mỗi đơn
 - **Manual Search**: Nhập số điện thoại và click button để crawl 1 số
 - **Message Extraction**: Trích xuất text, hình ảnh, timestamp, reply/mention từ DOM Salework
 - **Side Panel**: Mở bằng click icon extension hoặc `chrome.sidePanel.open()`

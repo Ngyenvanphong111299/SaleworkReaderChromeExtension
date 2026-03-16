@@ -14,7 +14,9 @@ const DYNAMIC_CONFIG = {
   maxInterval: 1500,
   scrollMaxInterval: 2000,
   scrollTimeout: 200000,
-  defaultTimeout: 10000
+  defaultTimeout: 10000,
+  RATE_LIMIT_CHECK_INTERVAL_MS: 1000,
+  RATE_LIMIT_WAIT_MS: 30000
 };
 
 // ============ DOM CACHE ============
@@ -188,6 +190,13 @@ function findAllConversations() {
   return result;
 }
 
+function getMessageCountForRateLimit() {
+  let c = document.querySelectorAll('.z2-message-container');
+  if (c.length === 0) c = document.querySelectorAll('[class*="message-container"]');
+  if (c.length === 0) c = document.querySelectorAll('div[class*="z2-message"]');
+  return c.length;
+}
+
 async function clickConversation(conv, index, total) {
   if (chrome?.runtime) {
     chrome.runtime.sendMessage({ type: 'CONTENT_LOG', text: 'Click vao conversation ' + (index + 1) + '/' + total + '...', logType: 'info' });
@@ -205,37 +214,30 @@ async function clickConversation(conv, index, total) {
 
   doClick(conv);
 
-  let found = await waitForCondition(
-    () => document.querySelector('.z2-message-container, [class*="message-container"]') !== null,
-    8000,
-    2000,
-    1200
+  const rateLimitWaitMs = DYNAMIC_CONFIG.RATE_LIMIT_WAIT_MS || 30000;
+  const checkIntervalMs = DYNAMIC_CONFIG.RATE_LIMIT_CHECK_INTERVAL_MS || 1000;
+  const hasMessage = await waitForCondition(
+    () => getMessageCountForRateLimit() >= 1,
+    rateLimitWaitMs,
+    checkIntervalMs,
+    checkIntervalMs
   );
 
-  if (!found) {
-    const altTarget = conv.querySelector('.name-conversation') || conv.querySelector('.z2-avatar-container') || conv.querySelector('.pointer');
-    if (altTarget && altTarget !== conv) {
-      if (chrome?.runtime) chrome.runtime.sendMessage({ type: 'CONTENT_LOG', text: 'Thu click vao name/avatar...', logType: 'warn' });
-      doClick(altTarget);
-      await new Promise(r => setTimeout(r, 500));
-      found = await waitForCondition(
-        () => document.querySelector('.z2-message-container, [class*="message-container"]') !== null,
-        6000,
-        2000,
-        1200
-      );
+  if (!hasMessage) {
+    if (chrome?.runtime) {
+      chrome.runtime.sendMessage({
+        type: 'CONTENT_LOG',
+        text: 'Rate limit: Khong co tin nhan sau ' + (rateLimitWaitMs / 1000) + 's - Reload trang va thu lai...',
+        logType: 'warn'
+      });
     }
+    return { rateLimit: true };
   }
 
   if (chrome?.runtime) {
-    chrome.runtime.sendMessage({
-      type: 'CONTENT_LOG',
-      text: found ? 'Da load conversation ' + (index + 1) : 'CHUA thay message container - click co the khong hoat dong',
-      logType: found ? 'info' : 'warn'
-    });
+    chrome.runtime.sendMessage({ type: 'CONTENT_LOG', text: 'Da load conversation ' + (index + 1) + ' (co tin nhan)', logType: 'info' });
   }
-
-  if (!found) await new Promise(r => setTimeout(r, 1500));
+  return { success: true };
 }
 
 // ============ MODULE 03: SCROLL ============
@@ -870,7 +872,12 @@ function fillAndSearchAndClick(phoneNumber) {
         const staffName = (await getStaffNameFromAvatarTooltip(conv)) || 'Conv ' + (convIdx + 1);
         const userName = getUserNameFromConversation(conv);
 
-        await clickConversation(conv, convIdx, allConvs.length);
+        const clickResult = await clickConversation(conv, convIdx, allConvs.length);
+        if (clickResult && clickResult.rateLimit) {
+          resolve({ success: false, rateLimit: true, error: 'Rate limit - khong co tin nhan sau khi click' });
+          return;
+        }
+
         await scrollUpToLoadMessages();
 
         const messages = extractMessages();
