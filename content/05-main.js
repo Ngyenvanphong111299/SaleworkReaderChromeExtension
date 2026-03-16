@@ -115,6 +115,8 @@ function fillAndSearchAndClick(phoneNumber) {
       let conversationIndex = 0;
 
       for (const conv of allConvs) {
+        conv.scrollIntoView({ block: 'center', behavior: 'instant' });
+        await new Promise(r => setTimeout(r, 300));
         const staffName = (await getStaffNameFromAvatarTooltip(conv)) || 'Conv ' + (conversationIndex + 1);
 
         const clickResult = await clickConversation(conv, conversationIndex, allConvs.length);

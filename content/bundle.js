@@ -786,10 +786,42 @@ async function waitForConversationsLoaded() {
  * @returns {string|null}
  */
 function getUserNameFromConversation(convElement) {
-  const nameEl = convElement.querySelector('.name-conversation');
-  if (!nameEl) return null;
-  const text = nameEl.textContent?.trim().replace(/\s+/g, ' ');
-  return text || null;
+  const selectors = [
+    '.name-conversation',
+    '[class*="name-conversation"]',
+    '.font-14.fw-500.trim-text-1-line'
+  ];
+  for (const sel of selectors) {
+    const nameEl = convElement.querySelector(sel);
+    if (nameEl) {
+      const text = nameEl.textContent?.trim().replace(/\s+/g, ' ');
+      if (text) return text;
+    }
+  }
+  return null;
+}
+
+/**
+ * Fallback: Lấy userName từ chat header sau khi đã click vào conversation
+ * (khi list re-render, conv element có thể bị thay thế)
+ * Header dùng .font-16.fw-500 cho tên (không có .name-conversation)
+ */
+function getUserNameFromChatHeader() {
+  const headerSelectors = [
+    '.z2-conversation-header .font-16.fw-500',
+    '.z2-conversation-header span.font-16.fw-500',
+    '[class*="conversation-header"] .font-16.fw-500',
+    '.z2-conversation-header [class*="name"]',
+    '[class*="conversation-header"] .name-conversation'
+  ];
+  for (const sel of headerSelectors) {
+    const el = document.querySelector(sel);
+    if (el) {
+      const text = el.textContent?.trim().replace(/\s+/g, ' ');
+      if (text) return text;
+    }
+  }
+  return null;
 }
 
 async function getStaffNameFromAvatarTooltip(convElement) {
@@ -869,13 +901,21 @@ function fillAndSearchAndClick(phoneNumber) {
 
       for (let convIdx = 0; convIdx < allConvs.length; convIdx++) {
         const conv = allConvs[convIdx];
+        // Scroll conv vào view trước khi lấy tên - tooltip cần element visible để render
+        conv.scrollIntoView({ block: 'center', behavior: 'instant' });
+        await new Promise(r => setTimeout(r, 300));
         const staffName = (await getStaffNameFromAvatarTooltip(conv)) || 'Conv ' + (convIdx + 1);
-        const userName = getUserNameFromConversation(conv);
+        let userName = getUserNameFromConversation(conv);
 
         const clickResult = await clickConversation(conv, convIdx, allConvs.length);
         if (clickResult && clickResult.rateLimit) {
           resolve({ success: false, rateLimit: true, error: 'Rate limit - khong co tin nhan sau khi click' });
           return;
+        }
+
+        if (!userName) {
+          await new Promise(r => setTimeout(r, 200));
+          userName = getUserNameFromChatHeader();
         }
 
         await scrollUpToLoadMessages();
@@ -943,7 +983,8 @@ window.__crawlerBundle = {
   extractMessages,
   fillAndSearchAndClick,
   getStaffNameFromAvatarTooltip,
-  getUserNameFromConversation
+  getUserNameFromConversation,
+  getUserNameFromChatHeader
 };
 
 console.log('========================================');

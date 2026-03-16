@@ -3,7 +3,7 @@
 // ============ ENVIRONMENT CONFIG ============
 export const ENV_CONFIG = {
   // Chế độ: 'development' hoặc 'production'
-  mode: 'production',
+  mode: 'development',
 
   // Development settings
   development: {
