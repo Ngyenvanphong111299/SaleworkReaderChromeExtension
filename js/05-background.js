@@ -6,6 +6,25 @@ import { API_BASE, ENV_CONFIG } from './01-config.js';
 
 logToPopup('Background script v2.1 đã tải. ENV: ' + ENV_CONFIG.mode, 'info');
 
+// Keep-alive: Chrome MV3 service worker bị kill sau ~30s idle. Crawl dài (scroll nhiều) khiến worker chết
+// → "message channel closed before response received". Alarm mỗi 20s giữ worker sống.
+const KEEP_ALIVE_ALARM = 'crawl-keep-alive';
+const KEEP_ALIVE_PERIOD_MINUTES = 0.5; // 30 giây - tối thiểu theo Chrome
+
+function startKeepAlive() {
+  chrome.alarms.create(KEEP_ALIVE_ALARM, { periodInMinutes: KEEP_ALIVE_PERIOD_MINUTES });
+}
+
+function stopKeepAlive() {
+  chrome.alarms.clear(KEEP_ALIVE_ALARM);
+}
+
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === KEEP_ALIVE_ALARM) {
+    // No-op - chỉ cần handler chạy để giữ worker alive
+  }
+});
+
 // Rate Limiting
 const RATE_LIMIT = {
   requestsPerSecond: 2,    // Tối đa 2 requests/giây
@@ -62,13 +81,22 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'START_CRAWL') {
     const orderLimit = message.orderLimit ?? 99999;
     logToPopup('[MSG] Bắt đầu crawl (tối đa ' + orderLimit + ' đơn)', 'info');
-    startCrawl(orderLimit).then((result) => {
-      sendResponse(result);
-    });
+    startKeepAlive();
+    startCrawl(orderLimit)
+      .then((result) => {
+        sendResponse(result);
+      })
+      .catch((err) => {
+        sendResponse({ success: false, error: err?.message || 'Lỗi' });
+      })
+      .finally(() => {
+        stopKeepAlive();
+      });
     return true;
 
   } else if (message.type === 'STOP_CRAWL') {
     stopCrawl();
+    stopKeepAlive();
     logToPopup('Da dung crawl', 'warn');
     sendResponse({ success: true });
 
