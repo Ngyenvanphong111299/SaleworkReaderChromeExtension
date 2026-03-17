@@ -1,7 +1,7 @@
 // Step 03: Scroll để load tin nhắn cũ với dynamic waiting
 
-var MAX_NO_CHANGE = 5;
-var SCROLL_WAIT_MS = 4000;
+var MAX_NO_CHANGE = 3;
+var SCROLL_WAIT_MS = 2500;
 var MAX_SCROLL_ATTEMPTS = 100;
 var WAIT_FOR_MESSAGES_MS = 2000;
 
@@ -95,7 +95,7 @@ async function scrollUpToLoadMessages() {
         const countAfter = getMessageCount();
         return countAfter > countBefore;
       },
-      5000, // 5s timeout cho mỗi scroll
+      SCROLL_WAIT_MS, // timeout cho mỗi scroll
       500,  // Bắt đầu với 500ms
       DYNAMIC_CONFIG.scrollMaxInterval
     );

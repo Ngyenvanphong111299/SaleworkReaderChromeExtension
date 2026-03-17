@@ -130,6 +130,25 @@ function fillPhoneNumber(phoneNumber) {
   return false;
 }
 
+/** Đóng dialog Salework nếu đang mở (tránh chặn ô search / kết quả) */
+function closeSaleworkDialog() {
+  const selectors = [
+    'body > div.bg-white > div > div > div.el-dialog__wrapper > div > div.el-dialog__header > button',
+    '.el-dialog__wrapper .el-dialog__header button',
+    '.el-dialog__headerbtn'
+  ];
+  for (const sel of selectors) {
+    try {
+      const btn = document.querySelector(sel);
+      if (btn) {
+        btn.click();
+        return true;
+      }
+    } catch (_) {}
+  }
+  return false;
+}
+
 function findAndClickSearchButton() {
   return domCache.get('searchButton', () => {
     const searchSelectors = [
@@ -525,7 +544,7 @@ async function scrollUpToLoadMessages() {
   let lastCount = 0;
   let noChangeCount = 0;
   let i = 0;
-  const MAX_NO_CHANGE = 5;
+  const MAX_NO_CHANGE = 3;
   const MAX_SCROLL_ATTEMPTS = 100;
 
   while (true) {
@@ -535,6 +554,9 @@ async function scrollUpToLoadMessages() {
     const currentContainers = document.querySelectorAll('.z2-message-container');
     const currentMessages = extractAllMessagesFromDOM(currentContainers);
     allExtractedMessages.push(...currentMessages);
+
+    // Bước 1b: Gán timestamp ngay sau mỗi lần scroll (Pass 2 - lớp 1)
+    assignTimestampToMessages(allExtractedMessages);
 
     // Bước 2: Đánh dấu tất cả tin nhắn hiện tại với data-loaded="true"
     currentContainers.forEach(el => el.setAttribute('data-loaded', 'true'));
@@ -569,7 +591,7 @@ async function scrollUpToLoadMessages() {
         const newMessages = total - loaded;
         return newMessages > 0;
       },
-      4000,
+      2500,
       500,
       DYNAMIC_CONFIG.scrollMaxInterval
     );
@@ -602,16 +624,8 @@ async function scrollUpToLoadMessages() {
     if (i >= MAX_SCROLL_ATTEMPTS) break;
   }
 
-  // Bước cuối: Duyệt lại toàn bộ array để gán timestamp cho các tin nhắn
-  let lastTimestampDate = null;
-  for (let i = allExtractedMessages.length - 1; i >= 0; i--) {
-    const m = allExtractedMessages[i];
-    if (m.type === 'timestamp') {
-      lastTimestampDate = parseDateFromTimestamp(m.time);
-    } else if (lastTimestampDate && m.time && /^\d{1,2}:\d{2}$/.test(m.time.trim())) {
-      m.time = lastTimestampDate + ' ' + m.time.trim();
-    }
-  }
+  // Bước cuối: Pass 2 - lớp 2 - đảm bảo timestamp đầy đủ cho toàn bộ tin nhắn
+  assignTimestampToMessages(allExtractedMessages);
 
   // Phân phối URL .aac vào tin nhắn audio (đồng bộ từ background trước - phòng message không tới content)
   await syncAacUrlsFromBackground();
@@ -668,6 +682,19 @@ function parseDateFromTimestamp(timestampStr) {
   const parts = timestampStr.trim().split(/\s+/);
   if (parts.length >= 1 && /^\d{1,2}\/\d{1,2}\/\d{4}$/.test(parts[0])) return parts[0];
   return null;
+}
+
+/** Pass 2: Gán ngày đầy đủ cho tin nhắn chỉ có giờ (HH:mm). Duyệt ngược, timestamp đánh dấu ngày cho tin nhắn phía trước. */
+function assignTimestampToMessages(messages) {
+  let lastTimestampDate = null;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (m.type === 'timestamp') {
+      lastTimestampDate = parseDateFromTimestamp(m.time);
+    } else if (lastTimestampDate && m.time && /^\d{1,2}:\d{2}$/.test(m.time.trim())) {
+      m.time = lastTimestampDate + ' ' + m.time.trim();
+    }
+  }
 }
 
 function extractMessages() {
@@ -965,6 +992,9 @@ function fillAndSearchAndClick(phoneNumber, maxConversations) {
     let currentRetry = 0;
 
     async function doSearchAndCrawl() {
+      closeSaleworkDialog();
+      await new Promise(r => setTimeout(r, 300));
+
       console.log('[FILL_SEARCH] Step 1: fillPhoneNumber');
       const inputFilled = fillPhoneNumber(phoneNumber);
       console.log('[FILL_SEARCH] Input filled:', inputFilled);
@@ -1098,6 +1128,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 window.__crawlerBundle = {
   findSearchInput,
   fillPhoneNumber,
+  closeSaleworkDialog,
   findAndClickSearchButton,
   findAllConversations,
   clickConversation,

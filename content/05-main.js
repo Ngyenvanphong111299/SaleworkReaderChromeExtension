@@ -71,6 +71,11 @@ function fillAndSearchAndClick(phoneNumber) {
     let currentRetry = 0;
 
     async function doSearchAndCrawl() {
+      if (window.__searchModule?.closeSaleworkDialog) {
+        window.__searchModule.closeSaleworkDialog();
+        await new Promise(r => setTimeout(r, 300));
+      }
+
       const inputFilled = fillPhoneNumber(phoneNumber);
       if (!inputFilled) return null;
 

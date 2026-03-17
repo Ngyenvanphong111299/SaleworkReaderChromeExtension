@@ -3,7 +3,7 @@
 // ============ ENVIRONMENT CONFIG ============
 export const ENV_CONFIG = {
   // Chế độ: 'development' hoặc 'production'
-  mode: 'development',
+  mode: 'production',
 
   // Development settings
   development: {
@@ -131,9 +131,9 @@ export const TIMING = {
   BETWEEN_ORDERS: 2000,
   SEARCH_RESULT_WAIT: 6000,
   CONVERSATION_LOAD: 3000,
-  SCROLL_WAIT: 4000,
+  SCROLL_WAIT: 2500,
   MAX_SCROLL_ATTEMPTS: 100,
-  MAX_NO_CHANGE_SCROLL: 5,
+  MAX_NO_CHANGE_SCROLL: 3,
   RETRY_DELAY: 1000,
   MAX_RETRIES: 5,
   EXTRACT_DELAY: 2000,

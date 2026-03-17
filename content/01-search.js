@@ -93,6 +93,25 @@ function fillPhoneNumber(phoneNumber) {
   return false;
 }
 
+/** Đóng dialog Salework nếu đang mở (tránh chặn ô search / kết quả) */
+function closeSaleworkDialog() {
+  const selectors = [
+    'body > div.bg-white > div > div > div.el-dialog__wrapper > div > div.el-dialog__header > button',
+    '.el-dialog__wrapper .el-dialog__header button',
+    '.el-dialog__headerbtn'
+  ];
+  for (const sel of selectors) {
+    try {
+      const btn = document.querySelector(sel);
+      if (btn) {
+        btn.click();
+        return true;
+      }
+    } catch (_) {}
+  }
+  return false;
+}
+
 function findAndClickSearchButton() {
   logToUI('[FIND_BUTTON] Đang tìm nút search...');
 
@@ -127,5 +146,6 @@ function findAndClickSearchButton() {
 window.__searchModule = {
   findSearchInput,
   fillPhoneNumber,
-  findAndClickSearchButton
+  findAndClickSearchButton,
+  closeSaleworkDialog
 };
