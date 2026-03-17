@@ -1,0 +1,370 @@
+import {
+    BEST_SELLER_ORDERS_COLOR, BEST_SELLER_REVENUE_COLOR, BEST_SELLER_STOCK_COLOR,
+    FINANCIAL_EXPENSE_COLOR, FINANCIAL_INCOME_COLOR, FINANCIAL_TOTAL_PRODUCT_VALUE_COLOR,
+    ORDER_NOT_SHIPPED_COLOR, ORDER_ON_SHIPPING_COLOR, ORDER_RETURNED_COLOR, ORDER_SUCCESS_COLOR, ORDER_CANCELLED_COLOR,
+    SALES_COUNT_COLOR, SALES_REVENUE_COLOR,
+    SHOPEE_COLOR, LAZADA_COLOR, TIKI_COLOR, TIKTOK_COLOR, SALEWORK_COLOR
+} from "./colors.js";
+
+$(window).on('load', () => {
+    if ($("#financial-report-card")[0]) getFinancialReport();
+    if ($("#7-days-report-by-channel-card")[0] || $("#7-days-report-by-status-card")[0] ||
+        $("#7-days-sales-report-card")[0] || ($("#daily-order-report-card")[0]))
+        getOrdersReport();
+    if ($("#best-seller-report-card")[0]) getBestSellerReport();
+
+    checkMobileAppUsage();
+})
+
+function checkMobileAppUsage() {
+    let request = new XMLHttpRequest();
+    request.onload = function () {
+        if (this.readyState === 4 && this.status === 200) {
+            $('#sw-mobile-app')[0].hidden = this.response.data;
+        }
+    }
+    request.responseType = "json";
+    request.open("GET", "/account/check-mobile-app-usage", true);
+    request.send();
+}
+
+
+/* QUICK REPORTS */
+function getFinancialReport() {
+    let request = new XMLHttpRequest();
+    request.onload = function () {
+        if (this.readyState === 4 && this.status === 200 && this.response.status === "success") {
+            let data = this.response.data;
+            let dateList = data.sumTotalValueByDay
+                .map(date => new Date(date._id.year, date._id.month - 1, date._id.day))
+                .sort((d1, d2) => d1 - d2);
+            let totalValueList = data.sumTotalValueByDay
+                .sort((k1, k2) => new Date(k1._id.year, k1._id.month, k1._id.day) - new Date(k2._id.year, k2._id.month, k2._id.day))
+                .map(element => element.total);
+            let incomeList = data.sumIncomeByDay
+                .sort((k1, k2) => new Date(k1._id.year, k1._id.month, k1._id.day) - new Date(k2._id.year, k2._id.month, k2._id.day))
+                .map(element => element.total);
+            let expenseList = data.sumExpenseByDay
+                .sort((k1, k2) => new Date(k1._id.year, k1._id.month, k1._id.day) - new Date(k2._id.year, k2._id.month, k2._id.day))
+                .map(element => {
+                    let tempElement = data.shopeeAds.find(shopeeAdsElement => {
+                        let tempDate = new Date(shopeeAdsElement.date);
+                        return tempDate.getFullYear() === element._id.year && tempDate.getMonth() + 1 === element._id.month && tempDate.getDate() === element._id.day
+                    });
+                    return element.total + tempElement.total;
+                })
+            renderFinancialReport(dateList, incomeList, expenseList, totalValueList);
+        }
+    }
+    request.responseType = "json";
+    request.open("GET", "/api/dashboard/financial-report", true);
+    request.send();
+}
+
+function getOrdersReport() {
+    let request = new XMLHttpRequest();
+    request.onload = function () {
+        if (this.readyState === 4 && this.status === 200 && this.response.status === "success") {
+            let data = JSON.parse(this.response.data);
+            let dateList = data.result.map(element => element.date)
+                .map(dateString => new Date(dateString)).sort((d1, d2) => d1 - d2);
+            if ($("#daily-order-report-card")[0]) processDailyOrderReport(data, dateList);
+            if ($("#7-days-report-by-channel-card")[0]) processOrdersReportByChannel(data, dateList);
+            if ($("#7-days-report-by-status-card")[0]) processOrdersReportByStatus(data, dateList);
+            if ($("#7-days-sales-report-card")[0]) processSalesReport(data, dateList);
+        }
+    }
+    request.responseType = "json";
+    request.open("GET", "/api/dashboard/orders-report", true);
+    request.send();
+}
+
+function processDailyOrderReport(data, dateList) {
+    let todayReportData = data.result.find(data => new Date(data.date).getTime() === dateList[dateList.length - 1].getTime());
+    let shopeeOrdersCount = todayReportData.channels.find(channel => channel.channel === 'shopee').order;
+    let lazadaOrdersCount = todayReportData.channels.find(channel => channel.channel === 'lazada').order;
+    let tikiOrdersCount = todayReportData.channels.find(channel => channel.channel === 'tiki').order;
+    let tiktokOrdersCount = todayReportData.channels.find(channel => channel.channel === 'tiktok').order;
+    let saleworkOrdersCount = todayReportData.channels.find(channel => channel.channel === 'salework').order;
+    renderDailyOrderReport(shopeeOrdersCount, lazadaOrdersCount, tikiOrdersCount, tiktokOrdersCount, saleworkOrdersCount);
+}
+
+function processSalesReport(data, dateList) {
+    let ordersList = [];
+    let revenueList = [];
+    data.result.forEach(element => {
+        ordersList.push(element.totalOrders);
+        revenueList.push(element.totalRevenue);
+    })
+    renderSalesReport(dateList, revenueList, ordersList);
+}
+
+function processOrdersReportByChannel(data, dateList) {
+    let shopeeRevenueList = [], lazadaRevenueList = [], tikiRevenueList = [], tiktokRevenueList = [],
+        saleworkRevenueList = [];
+    let shopeeOrdersList = [], lazadaOrdersList = [], tikiOrdersList = [], tiktokOrdersList = [],
+        saleworkOrdersList = [];
+    data.result.forEach(element => {
+        element.channels.forEach(channel => {
+            switch (channel.channel) {
+                case 'shopee':
+                    shopeeRevenueList.push(channel.revenue);
+                    shopeeOrdersList.push(channel.order);
+                    break;
+                case 'lazada':
+                    lazadaRevenueList.push(channel.revenue);
+                    lazadaOrdersList.push(channel.order);
+                    break;
+                case 'tiki':
+                    tikiRevenueList.push(channel.revenue);
+                    tikiOrdersList.push(channel.order);
+                    break;
+                case 'tiktok':
+                    tiktokRevenueList.push(channel.revenue);
+                    tiktokOrdersList.push(channel.order);
+                    break;
+                case 'salework':
+                    saleworkRevenueList.push(channel.revenue);
+                    saleworkOrdersList.push(channel.order);
+                    break;
+            }
+        })
+    })
+    renderOrdersReportByChannel(dateList, shopeeRevenueList, lazadaRevenueList, tikiRevenueList, tiktokRevenueList, saleworkRevenueList);
+}
+
+function processOrdersReportByStatus(data, dateList) {
+    let notShippedRevenueList = [], shippingRevenueList = [], successRevenueList = [],
+        returnedRevenueList = [], cancelledRevenueList = [];
+    let notShippedOrdersList = [], shippingOrdersList = [], successOrdersList = [],
+        returnedOrdersList = [], cancelledOrdersList = [];
+    data.result.forEach(element => {
+        element.status.forEach(status => {
+            switch (status.state) {
+                case 'notShipped':
+                    notShippedRevenueList.push(status.revenue);
+                    notShippedOrdersList.push(status.order);
+                    break;
+                case 'shiping':
+                    shippingRevenueList.push(status.revenue);
+                    shippingOrdersList.push(status.order);
+                    break;
+                case 'success':
+                    successRevenueList.push(status.revenue);
+                    successOrdersList.push(status.order);
+                    break;
+                case 'returned':
+                    returnedRevenueList.push(status.revenue);
+                    returnedOrdersList.push(status.order);
+                    break;
+                case 'cancelled':
+                    cancelledRevenueList.push(status.revenue);
+                    cancelledOrdersList.push(status.order);
+                    break;
+            }
+        })
+    })
+    renderOrdersReportByStatus(dateList, notShippedRevenueList, shippingRevenueList, successRevenueList, returnedRevenueList, cancelledRevenueList);
+}
+
+function getBestSellerReport() {
+    let request = new XMLHttpRequest();
+    request.onload = function () {
+        if (this.readyState === 4 && this.status === 200 && this.response.status === "success") {
+            let data = JSON.parse(this.response.data);
+            let productCodeList = [], revenueList = [], ordersList = [], stockList = [];
+            data.topProduct.forEach(product => {
+                productCodeList.push(product.code);
+                revenueList.push(product.revenue);
+                ordersList.push(product.amount);
+                stockList.push(product.amountStore);
+            })
+            renderBestSellersReport(productCodeList, revenueList, ordersList, stockList);
+        }
+    }
+    request.responseType = "json";
+    request.open("GET", "/api/dashboard/best-seller-report", true);
+    request.send();
+}
+
+function renderFinancialReport(dateList, incomeList, expenseList, totalValueList) {
+    let options = initChartOptions();
+    options.colors = [FINANCIAL_EXPENSE_COLOR, FINANCIAL_INCOME_COLOR, FINANCIAL_TOTAL_PRODUCT_VALUE_COLOR, 'rgba(255,255,255,0)'];
+    options.labels = dateList.map(date => format(date, 'date'));
+    let profitList = [];
+    for (let i = 0; i < incomeList.length; i++) {
+        profitList.push(incomeList[i] - expenseList[i]);
+    }
+    options.series = [
+        {name: 'Chi phí', type: 'area', data: expenseList},
+        {name: 'Doanh thu', type: 'area', data: incomeList},
+        {name: 'Tổng giá trị sản phẩm', type: 'area', data: totalValueList},
+        {name: 'Lợi nhuận', type: 'area', data: profitList},
+    ];
+    let chart = new ApexCharts(document.querySelector("#financial-report"), options);
+    chart.render();
+}
+
+function renderOrdersReportByChannel(dateList, shopeeRevenueList, lazadaRevenueList, tikiRevenueList, tiktokRevenueList, saleworkRevenueList) {
+    let options = initChartOptions();
+    options.colors = [SHOPEE_COLOR, LAZADA_COLOR, TIKI_COLOR, TIKTOK_COLOR, SALEWORK_COLOR];
+    if (isZeroArray(shopeeRevenueList)) options.colors = options.colors.filter(color => color !== SHOPEE_COLOR);
+    if (isZeroArray(lazadaRevenueList)) options.colors = options.colors.filter(color => color !== LAZADA_COLOR);
+    if (isZeroArray(tikiRevenueList)) options.colors = options.colors.filter(color => color !== TIKI_COLOR);
+    if (isZeroArray(tiktokRevenueList)) options.colors = options.colors.filter(color => color !== TIKTOK_COLOR);
+    if (isZeroArray(saleworkRevenueList)) options.colors = options.colors.filter(color => color !== SALEWORK_COLOR);
+
+    options.chart.stacked = true;
+    options.labels = dateList.map(date => format(date, 'date'));
+    options.series = [
+        {name: 'Shopee', type: 'area', data: shopeeRevenueList},
+        {name: 'Lazada', type: 'area', data: lazadaRevenueList},
+        {name: 'Tiki', type: 'area', data: tikiRevenueList},
+        {name: 'Tiktok', type: 'area', data: tiktokRevenueList},
+        {name: 'Salework', type: 'area', data: saleworkRevenueList}
+    ].filter(element => !isZeroArray(element.data));
+    let chart = new ApexCharts(document.querySelector("#orders-report-by-channel"), options);
+    chart.render();
+}
+
+function renderOrdersReportByStatus(dateList, notShippedRevenueList, shippingRevenueList, successRevenueList, returnedRevenueList, cancelledRevenueList) {
+    let options = initChartOptions();
+    options.colors = [ORDER_NOT_SHIPPED_COLOR, ORDER_ON_SHIPPING_COLOR, ORDER_SUCCESS_COLOR, ORDER_RETURNED_COLOR, ORDER_CANCELLED_COLOR];
+    if (isZeroArray(notShippedRevenueList)) options.colors = options.colors.filter(color => color !== ORDER_NOT_SHIPPED_COLOR);
+    if (isZeroArray(shippingRevenueList)) options.colors = options.colors.filter(color => color !== ORDER_ON_SHIPPING_COLOR);
+    if (isZeroArray(successRevenueList)) options.colors = options.colors.filter(color => color !== ORDER_SUCCESS_COLOR);
+    if (isZeroArray(returnedRevenueList)) options.colors = options.colors.filter(color => color !== ORDER_RETURNED_COLOR);
+    if (isZeroArray(cancelledRevenueList)) options.colors = options.colors.filter(color => color !== ORDER_CANCELLED_COLOR);
+    options.chart.stacked = true;
+    options.labels = dateList.map(date => format(date, 'date'));
+    options.series = [
+        {name: 'Chưa giao', type: 'area', data: notShippedRevenueList},
+        {name: 'Đang giao', type: 'area', data: shippingRevenueList},
+        {name: 'Thành công', type: 'area', data: successRevenueList},
+        {name: 'Hoàn', type: 'area', data: returnedRevenueList},
+        {name: 'Hủy', type: 'area', data: cancelledRevenueList},
+    ].filter(element => !isZeroArray(element.data));
+    let chart = new ApexCharts(document.querySelector("#orders-report-by-status"), options);
+    chart.render();
+}
+
+function renderSalesReport(dateList, revenueList, ordersList) {
+    let options = initChartOptions();
+    options.colors = [SALES_REVENUE_COLOR, SALES_COUNT_COLOR];
+    options.labels = dateList.map(date => format(date, 'date'));
+    options.series = [
+        {name: 'Doanh thu', type: 'column', data: revenueList},
+        {name: 'Đơn hàng', type: 'line', data: ordersList}
+    ];
+    options.stroke = {width: [1, 2]};
+    options.plotOptions = {bar: {columnWidth: '35%'}};
+    options.dataLabels = {enabled: true, enabledOnSeries: [1]};
+    options.yaxis = [
+        {labels: {formatter: value => format(value, 'currency')},},
+        {opposite: true, title: {text: 'Đơn hàng'}, labels: {formatter: value => format(value)}, show: false}
+    ];
+    let chart = new ApexCharts(document.querySelector("#sales-report"), options);
+    chart.render();
+}
+
+function renderBestSellersReport(productCodeList, revenueList, ordersList, stockList) {
+    let options = initChartOptions();
+    options.colors = [BEST_SELLER_REVENUE_COLOR, BEST_SELLER_ORDERS_COLOR, BEST_SELLER_STOCK_COLOR];
+    options.stroke = {width: [1, 2, 2]};
+    options.labels = productCodeList;
+    options.plotOptions = {bar: {columnWidth: '35%'}};
+    options.dataLabels = {enabled: true, enabledOnSeries: [1, 2]};
+    options.series = [
+        {name: 'Doanh thu (theo mã sản phẩm)', type: 'column', data: revenueList},
+        {name: 'Đã bán trong ngày', type: 'line', data: ordersList},
+        {name: 'Tồn kho', type: 'line', data: stockList}
+    ];
+    options.yaxis = [
+        {
+            // axisTicks: {show: true,},
+            // axisBorder: {show: true, color: BEST_SELLER_REVENUE_COLOR},
+            labels: {formatter: value => format(value, 'currency')},
+        },
+        {
+            show: false,
+            opposite: true,
+            axisTicks: {show: true,},
+            axisBorder: {show: true, color: BEST_SELLER_ORDERS_COLOR},
+            labels: {formatter: value => format(value)},
+            title: {text: "Đã bán trong ngày"}
+        },
+        {
+            show: false,
+            opposite: true,
+            axisTicks: {show: true,},
+            axisBorder: {show: true, color: BEST_SELLER_STOCK_COLOR},
+            labels: {formatter: value => format(value)},
+            title: {text: "Tồn kho",},
+        },
+    ];
+    let chart = new ApexCharts(document.querySelector("#best-sellers-report"), options);
+    chart.render();
+}
+
+function renderDailyOrderReport(shopeeOrdersCount, lazadaOrdersCount, tikiOrdersCount, tiktokOrdersCount, saleworkOrdersCount) {
+    $("#shopeeOrdersCount")[0].innerHTML = shopeeOrdersCount;
+    $("#lazadaOrdersCount")[0].innerHTML = lazadaOrdersCount;
+    $("#tikiOrdersCount")[0].innerHTML = tikiOrdersCount;
+    $("#tiktokOrdersCount")[0].innerHTML = tiktokOrdersCount;
+    $("#saleworkOrdersCount")[0].innerHTML = saleworkOrdersCount;
+    let colors = [SHOPEE_COLOR, LAZADA_COLOR, TIKI_COLOR, TIKTOK_COLOR, SALEWORK_COLOR];
+    if (shopeeOrdersCount <= 0) colors = colors.filter(color => color !== SHOPEE_COLOR);
+    if (lazadaOrdersCount <= 0) colors = colors.filter(color => color !== LAZADA_COLOR);
+    if (tikiOrdersCount <= 0) colors = colors.filter(color => color !== TIKI_COLOR);
+    if (tiktokOrdersCount <= 0) colors = colors.filter(color => color !== TIKTOK_COLOR);
+    if (saleworkOrdersCount <= 0) colors = colors.filter(color => color !== SALEWORK_COLOR);
+
+    Morris.Donut({
+        element: 'daily-order-report',
+        colors: colors,
+        data: [
+            {label: "Shopee", value: shopeeOrdersCount},
+            {label: "Lazada", value: lazadaOrdersCount},
+            {label: "Tiki", value: tikiOrdersCount},
+            {label: "Tiktok", value: tiktokOrdersCount},
+            {label: "Salework", value: saleworkOrdersCount},
+        ].filter(element => element.value > 0)
+    });
+}
+
+function initChartOptions() {
+    return {
+        chart: {height: 380, zoom: {enabled: false}, toolbar: {show: false},},
+        stroke: {width: 1, curve: 'smooth'},
+        fill: {type: "solid", opacity: 0.8},
+        markers: {size: 0},
+        yaxis: [{
+            labels: {formatter: value => format(value, 'currency')},
+        }],
+        tooltip: {
+            shared: true,
+        },
+        legend: {offsetY: 5,},
+        grid: {padding: {bottom: 10}},
+    }
+}
+
+function format(value, type) {
+    value = (value) ? value : 0;
+    switch (type) {
+        case 'currency':
+            if(value % 100000 === 0) return (value/1000000).toFixed(1) + " tr"
+            return value.toLocaleString("vi-VN", {style: "currency", currency: "VND"});
+        case 'date':
+            return `${value.getDate()}-${value.getMonth() + 1}-${value.getFullYear()}`;
+        default:
+            return value.toLocaleString("vi-VN");
+    }
+}
+
+function isZeroArray(array) {
+    for (const arrayElement of array) {
+        if (arrayElement !== 0) return false;
+    }
+    return true;
+}
