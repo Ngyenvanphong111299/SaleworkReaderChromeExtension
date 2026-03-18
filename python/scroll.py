@@ -21,7 +21,27 @@ class ScrollModule:
         self.max_no_change = TIMING.MAX_NO_CHANGE_SCROLL
 
     async def find_scroll_container(self) -> Optional[Any]:
-        """Tìm scroll container của chat"""
+        """Tìm scroll container của chat - match extension logic"""
+        # Extension logic: first find .z2-conversation-body, then find .el-scrollbar__wrap inside
+        try:
+            body = self.driver.find_element("css selector", ".z2-conversation-body, [class*='conversation-body']")
+            if body:
+                # Try el-scrollbar__wrap inside body
+                try:
+                    wrap = body.find_element("css selector", ".el-scrollbar__wrap")
+                    if wrap:
+                        return wrap
+                except:
+                    pass
+                # Fallback: return body if scrollable
+                scroll_height = self.driver.execute_script("return arguments[0].scrollHeight", body)
+                client_height = self.driver.execute_script("return arguments[0].clientHeight", body)
+                if scroll_height > client_height:
+                    return body
+        except:
+            pass
+
+        # Fallback: try selectors directly
         for selector in SELECTORS["scroll_container"]:
             try:
                 container = self.driver.find_element("css selector", selector)
@@ -87,12 +107,13 @@ class ScrollModule:
     async def scroll_to_bottom(self) -> bool:
         """Scroll xuống bottom (Step 3 trong extension)"""
         try:
+            # Use JavaScript to find container like extension does
             self.driver.execute_script("""
-                const container = document.querySelector('.z2-conversation-body, .el-scrollbar__wrap');
-                if (container) {
-                    container.scrollTop = 0;
-                    container.dispatchEvent(new Event('scroll', { bubbles: true }));
-                }
+                const body = document.querySelector('.z2-conversation-body, [class*="conversation-body"]');
+                if (!body) return;
+                const container = body.querySelector('.el-scrollbar__wrap') || body;
+                container.scrollTop = 0;
+                container.dispatchEvent(new Event('scroll', { bubbles: true }));
             """)
             time.sleep(1.5)  # Wait for scroll
             return True
@@ -103,13 +124,14 @@ class ScrollModule:
     async def scroll_to_top(self) -> bool:
         """Scroll lên top để load tin nhắn cũ (Step 4 trong extension)"""
         try:
+            # Use JavaScript to find container like extension does
             self.driver.execute_script("""
-                const container = document.querySelector('.z2-conversation-body, .el-scrollbar__wrap');
-                if (container) {
-                    container.scrollTop = -99999;
-                    container.scrollBy(0, -99999);
-                    container.dispatchEvent(new Event('scroll', { bubbles: true }));
-                }
+                const body = document.querySelector('.z2-conversation-body, [class*="conversation-body"]');
+                if (!body) return;
+                const container = body.querySelector('.el-scrollbar__wrap') || body;
+                container.scrollTop = -99999;
+                container.scrollBy(0, -99999);
+                container.dispatchEvent(new Event('scroll', { bubbles: true }));
             """)
             time.sleep(1)  # Wait for messages to load
             return True
@@ -131,10 +153,35 @@ class ScrollModule:
             return { scrollTop: 0, scrollHeight: 0, clientHeight: 0 };
         """)
 
+    async def _wait_for_new_messages(self, timeout: int = 2500, check_interval: int = 500) -> bool:
+        """
+        Đợi tin mới load xong (như extension dùng waitForCondition)
+        Returns True nếu có tin mới, False nếu timeout
+        """
+        start_time = time.time() * 1000
+        last_count = await self.get_message_count()
+
+        while (time.time() * 1000 - start_time) < timeout:
+            await asyncio.sleep(check_interval / 1000)
+
+            current_count = await self.get_message_count()
+            loaded_count = await self.get_loaded_message_count()
+            new_messages = current_count - loaded_count
+
+            if new_messages > 0:
+                return True
+
+            # Nếu count giảm (do xóa) thì cũng có thể là có tin mới
+            # Vì vậy check luôn total count
+            if current_count > 0:
+                return True
+
+        return False
+
     async def scroll_up_to_load_messages(self, max_attempts: int = None) -> Dict[str, Any]:
         """
         Scroll up để load toàn bộ tin nhắn
-        Match logic từ extension: two-step scroll + data-loaded marking
+        Match logic từ extension: extract → mark → scroll → repeat
         """
         max_attempts = max_attempts or self.max_scroll_attempts
         log("info", "Bắt đầu scroll để load tin nhắn...")
@@ -163,25 +210,26 @@ class ScrollModule:
         while i < max_attempts:
             i += 1
 
-            # Get current messages (trước khi scroll)
+            # Bước 1: Get current messages count TRƯỚC KHI mark
             current_count = await self.get_message_count()
             loaded_count = await self.get_loaded_message_count()
 
-            # Đánh dấu tin nhắn hiện tại là đã load
-            await self.mark_messages_as_loaded()
-
             log("info", f"Scroll {i}: {current_count} messages, {loaded_count} loaded")
 
-            # Step 3: Scroll xuống bottom trước
+            # Bước 2: Đánh dấu tin nhắn hiện tại là đã load (SAU KHI đếm)
+            await self.mark_messages_as_loaded()
+
+            # Bước 3: Scroll xuống bottom trước (như extension)
             await self.scroll_to_bottom()
 
-            # Step 4: Scroll lên top để load tin nhắn mới
+            # Bước 4: Scroll lên top để load tin nhắn mới
             await self.scroll_to_top()
 
-            # Chờ tin mới load xong
-            time.sleep(1)
+            # Bước 5: ĐỢI tin mới load xong (như extension dùng waitForCondition)
+            # Extension dùng: waitForCondition(() => newMessages > 0, 2500, 500, maxInterval)
+            await self._wait_for_new_messages()
 
-            # Kiểm tra có tin mới không
+            # Bước 6: Kiểm tra có tin mới không
             new_total = await self.get_message_count()
             new_loaded = await self.get_loaded_message_count()
             new_messages = new_total - new_loaded
@@ -189,10 +237,19 @@ class ScrollModule:
             if new_messages > 0:
                 log("info", f"  → Có {new_messages} tin nhắn mới!")
                 no_change_count = 0
+
+                # Bước 7: XÓA tin nhắn đã đánh dấu CHỈ KHI có tin mới (như extension)
+                try:
+                    self.driver.execute_script("""
+                        document.querySelectorAll('.z2-message-container[data-loaded="true"]').forEach(el => el.remove());
+                    """)
+                except:
+                    pass
             else:
                 no_change_count += 1
                 log("info", f"  → Không có tin mới ({no_change_count}/{self.max_no_change})")
 
+                # KHÔNG xóa khi không có tin mới - giữ lại để extract!
                 if no_change_count >= self.max_no_change:
                     log("info", "Đã đến top, dừng scroll")
                     break

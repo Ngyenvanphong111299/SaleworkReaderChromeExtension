@@ -105,15 +105,17 @@ class SaleworkCrawler:
             log("info", f"  Conversation {i+1}/{len(conversation_elements)}...")
 
             try:
+                # Scroll element into view first
+                self.driver.execute_script("arguments[0].scrollIntoView(true);", conv_el)
+                time.sleep(0.5)
+
                 # Get conversation info
                 staff_name = await search.get_staff_name_from_avatar(conv_el)
                 user_name = await search.get_user_name_from_conversation(conv_el)
 
-                log("debug", f"    Staff: {staff_name}, User: {user_name}")
-
-                # Click to open
-                conv_el.click()
-                time.sleep(2)
+                # Click using JavaScript (more reliable)
+                self.driver.execute_script("arguments[0].click();", conv_el)
+                time.sleep(3)  # Wait for page to load
 
                 # Extract messages
                 conv_data = await extractor.extract_conversation(
@@ -127,15 +129,23 @@ class SaleworkCrawler:
                 else:
                     log("warn", "    Không có tin nhắn")
 
-                # Go back to list
+                # Go back to list - try multiple selectors
                 try:
-                    back_btn = self.driver.find_element(
-                        "css selector",
-                        ".z2-back-button, [class*='back'], .btn-back"
-                    )
-                    if back_btn:
-                        back_btn.click()
-                        time.sleep(1.5)
+                    back_selectors = [
+                        ".z2-back-button",
+                        "[class*='back']",
+                        ".btn-back",
+                        "button[class*='back']"
+                    ]
+                    for selector in back_selectors:
+                        try:
+                            back_btn = self.driver.find_element("css selector", selector)
+                            if back_btn:
+                                self.driver.execute_script("arguments[0].click();", back_btn)
+                                time.sleep(2)
+                                break
+                        except:
+                            continue
                 except:
                     pass
 

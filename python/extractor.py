@@ -4,7 +4,7 @@ import time
 from typing import List, Dict, Any, Optional
 
 from .config import SELECTORS
-from .parser import MessageParser, ConversationParser, assign_timestamps_to_messages
+from .parser import MessageParser, ConversationParser, assign_timestamps_to_messages, MessageParser
 from .scroll import ScrollModule
 from .utils import log
 
@@ -64,6 +64,18 @@ class MessageExtractor:
                 messages.append(msg)
 
         log("success", f"Đã parse {len(messages)} tin nhắn")
+
+        # Debug: count timestamp markers before dedup
+        marker_count = sum(1 for m in messages if m.get('messageType') == 'timestamp')
+        log("info", f"Timestamp markers trước dedup: {marker_count}")
+
+        # Deduplicate messages (tránh trùng lặp từ nhiều vòng scroll)
+        messages = MessageParser.deduplicate_messages(messages)
+        log("info", f" sau deduplicate: {len(messages)} tin nhắn")
+
+        # Debug: count timestamp markers after dedup
+        marker_count = sum(1 for m in messages if m.get('messageType') == 'timestamp')
+        log("info", f"Timestamp markers sau dedup: {marker_count}")
 
         # Assign timestamps if requested
         if assign_ts:

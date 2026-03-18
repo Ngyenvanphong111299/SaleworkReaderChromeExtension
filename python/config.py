@@ -50,19 +50,17 @@ SELECTORS: Dict[str, List[str]] = {
         "input[class*='search']",
     ],
 
-    # Conversation List
+    # Conversation List (container)
     "conversation_list": [
         ".z2-conversation-list",
         ".z2-conver-list-container .z2-conversation-list",
-        ".z2-conv-item-container",
-        "[class*='conv-item-container']",
     ],
 
-    # Conversation Item
+    # Conversation Item (individual rows)
     "conversation_item": [
+        ".z2-conv-item-container",
+        "[class*='conv-item-container']",
         ".pointer.hover-highlight.border-bottom",
-        ".z2-conv-item-container .pointer",
-        ":scope > div > div.pointer",
     ],
 
     # Conversation Name
@@ -74,6 +72,7 @@ SELECTORS: Dict[str, List[str]] = {
     # Staff Name (from avatar tooltip)
     "staff_avatar": [
         ".z2-avatar img[src*='avatar']",
+        ".z2-avatar-tooltip[aria-describedby]",
         "[class*='avatar'] img",
     ],
 
@@ -107,10 +106,10 @@ SELECTORS: Dict[str, List[str]] = {
         ".mb-0.mt-1.mx-12.text-normal",
     ],
 
-    # Timestamp
+    # Timestamp (date markers like "12/03/2026")
     "timestamp_marker": [
         "div.w-100.text-center span",
-        "[class*='text-center'] span",
+        "[class*='text-center'][class*='w-100'] span",
     ],
     "timestamp_footer": [
         ".z2-message-item-right-footer",

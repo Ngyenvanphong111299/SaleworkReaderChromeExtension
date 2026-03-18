@@ -67,37 +67,21 @@ class SearchModule:
         # Find input
         log("info", f"Đang điền số điện thoại: {clean_phone}")
 
-        # Try to fill using fill_input utility
-        success = await fill_input(
-            self.driver,
-            SELECTORS["search_input"],
-            clean_phone
-        )
+        # Try each selector
+        for selector in SELECTORS["search_input"]:
+            try:
+                input_el = self.driver.find_element("css selector", selector)
+                if input_el:
+                    input_el.clear()
+                    input_el.send_keys(clean_phone)
+                    time.sleep(0.3)
+                    await press_key(self.driver, "Enter")
+                    log("success", "Đã điền số điện thoại và Enter")
+                    return True
+            except:
+                continue
 
-        if success:
-            time.sleep(0.5)
-            # Press Enter to search
-            await press_key(self.driver, "Enter")
-            log("success", "Đã điền số điện thoại và Enter")
-            return True
-
-        # Fallback: try direct fill
-        try:
-            for selector in SELECTORS["search_input"]:
-                try:
-                    input_el = self.driver.find_element("css selector", selector)
-                    if input_el:
-                        input_el.clear()
-                        input_el.send_keys(clean_phone)
-                        time.sleep(0.3)
-                        await press_key(self.driver, "Enter")
-                        log("success", "Đã điền số điện thoại (fallback)")
-                        return True
-                except:
-                    continue
-        except Exception as e:
-            log("error", f"Lỗi fill phone: {e}")
-
+        log("error", "Không tìm thấy ô search input!")
         return False
 
     async def wait_for_search_results(self, timeout: int = 10000) -> bool:
@@ -120,75 +104,237 @@ class SearchModule:
         return True  # Continue anyway
 
     async def find_all_conversations(self) -> List[Any]:
-        """Tìm tất cả conversation items"""
+        """Tìm tất cả conversation items - match extension logic"""
+        # First, find the conversation list container
+        conv_list = None
+        for selector in SELECTORS["conversation_list"]:
+            try:
+                conv_list = self.driver.find_element("css selector", selector)
+                if conv_list:
+                    break
+            except:
+                pass
+
+        if not conv_list:
+            log("info", "Không tìm thấy conversation list container")
+            return []
+
+        # Now find conversation items within that container
         conversations = []
 
-        # Try multiple selectors
-        for selector in SELECTORS["conversation_item"]:
+        # Try selectors in order (like extension does)
+        selectors_to_try = [
+            ".z2-conv-item-container",
+            "[class*='conv-item-container']",
+            ".pointer.hover-highlight.border-bottom",
+            ":scope > div > div.pointer",
+            ":scope > div > div"
+        ]
+
+        for selector in selectors_to_try:
             try:
-                elements = self.driver.find_elements("css selector", selector)
+                elements = conv_list.find_elements("css selector", selector)
                 if elements and len(elements) > 0:
-                    conversations.extend(elements)
+                    conversations = elements
+                    break
             except:
                 pass
 
-        # Also try container-level selectors
+        # Fallback: find by name elements
         if not conversations:
-            for container_selector in SELECTORS["conversation_list"]:
-                try:
-                    container = self.driver.find_element("css selector", container_selector)
-                    if container:
-                        items = container.find_elements("css selector", ".pointer, [class*='item']")
-                        if items:
-                            conversations.extend(items)
-                except:
-                    pass
-
-        # Remove duplicates
-        seen = set()
-        unique_conversations = []
-        for conv in conversations:
             try:
-                conv_id = id(conv)
-                if conv_id not in seen:
-                    seen.add(conv_id)
-                    unique_conversations.append(conv)
+                name_els = conv_list.find_elements("css selector", ".name-conversation")
+                for name_el in name_els:
+                    try:
+                        # Try to find parent row
+                        row = name_el.find_element("xpath", "./ancestor::div[contains(@class, 'conv-item') or contains(@class, 'pointer')]")
+                        if row and row not in conversations:
+                            conversations.append(row)
+                    except:
+                        pass
             except:
                 pass
 
-        log("info", f"Tìm thấy {len(unique_conversations)} conversations")
-        return unique_conversations
+        # Filter out search input
+        if conversations:
+            filtered = []
+            for conv in conversations:
+                try:
+                    # Check if this is a search input (should not be)
+                    search_input = conv.find_elements("css selector", "input[type='search'], input[placeholder*='tìm'], input[placeholder*='search']")
+                    if not search_input:
+                        filtered.append(conv)
+                except:
+                    filtered.append(conv)
+
+            if filtered:
+                conversations = filtered
+            else:
+                # If all filtered out, use original
+                pass
+
+        log("info", f"Tìm thấy {len(conversations)} conversations")
+        return conversations
 
     async def get_staff_name_from_avatar(self, conversation_el: Any) -> Optional[str]:
-        """Lấy tên nhân viên từ avatar tooltip"""
+        """
+        Lấy tên nhân viên từ avatar tooltip
+        Extension uses: .z2-avatar-tooltip[aria-describedby] to find avatar, then get tooltip by ID
+        """
+        from selenium.webdriver.common.action_chains import ActionChains
+
+        # Scroll conversation into view first (like extension: conv.scrollIntoView)
         try:
-            # Hover to show tooltip
-            avatar = conversation_el.find_element(
-                "css selector",
-                "img[src*='avatar'], [class*='avatar'] img"
-            )
-            if avatar:
-                from selenium.webdriver.common.action_chains import ActionChains
-                ActionChains(self.driver).move_to_element(avatar).perform()
-                time.sleep(0.5)
+            self.driver.execute_script("arguments[0].scrollIntoView({ block: 'center', behavior: 'instant' });", conversation_el)
+            time.sleep(0.3)
+        except:
+            pass
 
-                # Get tooltip text
-                tooltip = self.driver.find_element(
+        # First try JavaScript approach like extension
+        try:
+            staff_name = self.driver.execute_script("""
+                var conv = arguments[0];
+
+                // First scroll conv into view
+                conv.scrollIntoView({ block: 'center', behavior: 'instant' });
+
+                // Try multiple selectors like extension
+                var avatarEl = null;
+                var selectors = [
+                    '.z2-avatar-tooltip[aria-describedby]',
+                    '.z2-avatar[aria-describedby]',
+                    '.z2-avatar img[src*="avatar"]',
+                    '.z2-avatar'
+                ];
+
+                for (var i = 0; i < selectors.length; i++) {
+                    avatarEl = conv.querySelector(selectors[i]);
+                    if (avatarEl) break;
+                }
+
+                if (!avatarEl) return null;
+
+                var tooltipId = avatarEl.getAttribute('aria-describedby');
+
+                // If no aria-describedby, try to find tooltip by title or other attributes
+                if (!tooltipId) {
+                    var title = avatarEl.getAttribute('title');
+                    if (title) return title;
+                }
+
+                if (!tooltipId) return null;
+
+                // Trigger hover - use both mouseenter and mouseover
+                avatarEl.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true, view: window }));
+                avatarEl.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, view: window }));
+
+                // Also try dispatching on the element itself
+                if (avatarEl.tagName === 'IMG') {
+                    var parent = avatarEl.parentElement;
+                    if (parent) {
+                        parent.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
+                    }
+                }
+
+                // Wait for tooltip to render - check multiple times
+                var start = Date.now();
+                var tooltipEl = null;
+                while (Date.now() - start < 600) {
+                    tooltipEl = document.getElementById(tooltipId);
+                    if (tooltipEl && (tooltipEl.textContent || tooltipEl.innerText)) break;
+                    // Also check for any visible tooltip
+                    var allTooltips = document.querySelectorAll('[role="tooltip"], .el-tooltip__popper');
+                    for (var j = 0; j < allTooltips.length; j++) {
+                        var t = allTooltips[j];
+                        if (t.offsetParent !== null && (t.textContent || t.innerText)) {
+                            var txt = (t.textContent || t.innerText).trim();
+                            if (txt && txt.length > 2) {
+                                return txt.replace(/\\s+/g, ' ');
+                            }
+                        }
+                    }
+                }
+
+                if (tooltipEl) {
+                    var text = tooltipEl.textContent || tooltipEl.innerText;
+                    if (text && text.trim()) {
+                        text = text.trim().replace(/\\s+/g, ' ');
+                        return text;
+                    }
+                }
+
+                return null;
+            """, conversation_el)
+
+            if staff_name and isinstance(staff_name, str) and staff_name not in ['NO_AVATAR_FOUND', 'NO_TOOLTIP_ID', 'TOOLTIP_NOT_FOUND', '']:
+                return staff_name
+        except Exception as e:
+            pass
+
+        # Fallback: Selenium approach
+        try:
+            # Method 1: Use .z2-avatar-tooltip[aria-describedby] like extension
+            try:
+                avatar = conversation_el.find_element(
                     "css selector",
-                    ".el-tooltip__popper, [class*='tooltip']"
+                    ".z2-avatar-tooltip[aria-describedby]"
                 )
-                if tooltip:
-                    text = tooltip.text
-                    if text:
-                        return text.strip()
+                if avatar:
+                    tooltip_id = avatar.get_attribute("aria-describedby")
+                    if tooltip_id:
+                        # Hover to show tooltip
+                        ActionChains(self.driver).move_to_element(avatar).perform()
+                        time.sleep(0.5)
 
-                # Alternative: check element title or aria-label
-                title = avatar.get_attribute("title")
-                if title:
-                    return title.strip()
+                        # Get tooltip by ID (like extension)
+                        try:
+                            tooltip = self.driver.find_element("css selector", f"#{tooltip_id}")
+                            if tooltip:
+                                text = tooltip.text
+                                if text:
+                                    return text.strip().replace('\n', ' ')
+                        except:
+                            pass
+
+                        # Try alternative tooltip selectors
+                        try:
+                            tooltip = self.driver.find_element(
+                                "css selector",
+                                f".el-tooltip__popper#{tooltip_id}, [id='{tooltip_id}']"
+                            )
+                            if tooltip:
+                                text = tooltip.text
+                                if text:
+                                    return text.strip().replace('\n', ' ')
+                        except:
+                            pass
+            except:
+                pass
+
+            # Method 2: Fallback - find avatar img and hover
+            try:
+                avatar = conversation_el.find_element(
+                    "css selector",
+                    ".z2-avatar img, [class*='avatar'] img"
+                )
+                if avatar:
+                    ActionChains(self.driver).move_to_element(avatar).perform()
+                    time.sleep(0.4)
+
+                    # Try to find tooltip
+                    tooltips = self.driver.find_elements(
+                        "css selector",
+                        ".el-tooltip__popper, [class*='tooltip__popper'], [role='tooltip']"
+                    )
+                    for tooltip in tooltips:
+                        text = tooltip.text
+                        if text and len(text.strip()) > 2:
+                            return text.strip().replace('\n', ' ')
+            except:
+                pass
 
         except Exception as e:
-            log("debug", f"Lỗi lấy staff name: {e}")
+            pass
 
         return None
 
@@ -217,7 +363,7 @@ class SearchModule:
                         return line
 
         except Exception as e:
-            log("debug", f"Lỗi lấy user name: {e}")
+            pass
 
         return None
 
